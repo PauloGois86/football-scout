@@ -1,0 +1,1691 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FootScout</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0d12; --surf:#111520; --surf2:#171c2a; --border:#1e2535;
+  --accent:#00e5a0; --blue:#0077ff; --warn:#ffb800; --danger:#ff3d5a;
+  --text:#e8eaf0; --muted:#5a6278;
+  --green:#00e5a0; --lime:#a3e635; --yellow:#ffb800; --red:#ff3d5a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,160,.015) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,160,.015) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+
+/* HEADER */
+header{position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:16px 28px;border-bottom:1px solid var(--border);background:rgba(10,13,18,.95);backdrop-filter:blur(12px)}
+.logo{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:3px;color:var(--accent);text-shadow:0 0 24px rgba(0,229,160,.4)}
+.logo span{color:var(--text)}
+.hdr-right{display:flex;align-items:center;gap:20px}
+.api-status{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)}
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 2s infinite}
+.dot.err{background:var(--danger);box-shadow:0 0 8px var(--danger)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* TABS */
+.tabs{position:relative;z-index:5;display:flex;gap:0;border-bottom:1px solid var(--border);background:rgba(17,21,32,.8)}
+.tab{padding:12px 24px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* CONTROLS */
+.controls{position:relative;z-index:5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 28px;border-bottom:1px solid var(--border);background:rgba(17,21,32,.5)}
+.ctrl-label{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px}
+select,input,button{background:var(--surf2);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:5px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;transition:all .2s}
+select:hover,button:hover{border-color:var(--accent);color:var(--accent)}
+input{cursor:text}
+input:focus{outline:none;border-color:var(--accent)}
+.btn-accent{background:rgba(0,229,160,.1);border-color:rgba(0,229,160,.3);color:var(--accent);display:flex;align-items:center;gap:5px}
+.btn-accent:hover{background:rgba(0,229,160,.2)}
+.spinner{width:13px;height:13px;border:2px solid transparent;border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;display:none}
+.loading .spinner{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* LAYOUT */
+.main{position:relative;z-index:2;display:grid;grid-template-columns:330px 1fr;min-height:calc(100vh - 120px)}
+.pane{display:none}
+.pane.active{display:contents}
+
+/* FIXTURE LIST */
+.fixture-list{border-right:1px solid var(--border);overflow-y:auto;max-height:calc(100vh - 120px)}
+.day-header{padding:8px 14px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:2px;background:rgba(0,0,0,.3);position:sticky;top:0;z-index:3}
+.fixture-card{padding:12px 14px;border-bottom:1px solid rgba(30,37,53,.5);cursor:pointer;transition:all .15s;position:relative}
+.fixture-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:transparent;transition:.2s}
+.fixture-card:hover{background:rgba(0,229,160,.04)}
+.fixture-card:hover::before{background:rgba(0,229,160,.3)}
+.fixture-card.active{background:rgba(0,229,160,.07)}
+.fixture-card.active::before{background:var(--accent)}
+.fix-league{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:5px}
+.fix-teams{font-size:12px;font-weight:500;line-height:1.5}
+.fix-meta{display:flex;justify-content:space-between;align-items:center;margin-top:5px}
+.fix-time{font-family:'DM Mono',monospace;font-size:11px;color:var(--blue)}
+.empty-list{padding:30px 16px;text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:1px}
+
+/* ANALYSIS PANEL */
+.analysis-panel{overflow-y:auto;max-height:calc(100vh - 120px);padding:22px 26px}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:400px;gap:10px;color:var(--muted)}
+.empty-icon{font-size:44px;opacity:.3}
+.empty-text{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase}
+
+/* MATCH HEADER */
+.match-header{margin-bottom:22px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+.match-league-badge{font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+.match-teams{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;line-height:1.1;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.vs-badge{font-size:14px;color:var(--muted);padding:3px 7px;border:1px solid var(--border);border-radius:3px}
+.match-meta-row{display:flex;gap:16px;margin-top:8px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);flex-wrap:wrap}
+.match-meta-row span{color:var(--text);margin-left:3px}
+
+/* SECTION TITLE */
+.stitle{font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:12px;margin-top:22px;display:flex;align-items:center;gap:8px}
+.stitle::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)}
+
+/* ODDS GRID */
+.odds-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px}
+.ocard{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:14px;position:relative;overflow:hidden}
+.ocard::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.ocard.value-green::before{background:var(--green)}
+.ocard.value-lime::before{background:var(--lime)}
+.ocard.value-yellow::before{background:var(--yellow)}
+.ocard.value-red::before{background:var(--red)}
+.olabel{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px}
+.ovalue{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;line-height:1}
+.ovalue.nd{font-size:18px;color:var(--muted)}
+.oprobs{margin-top:8px;display:flex;gap:6px}
+.prob-item{flex:1;text-align:center}
+.prob-label{font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);display:block;margin-bottom:2px}
+.prob-val{font-family:'DM Mono',monospace;font-size:12px;font-weight:500}
+.prob-val.imp{color:var(--blue)}
+.prob-val.est{color:var(--accent)}
+.vbadge{display:inline-block;margin-top:6px;padding:2px 7px;border-radius:3px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px}
+.badge-green{background:rgba(0,229,160,.15);color:var(--green)}
+.badge-lime{background:rgba(163,230,53,.15);color:var(--lime)}
+.badge-yellow{background:rgba(255,184,0,.15);color:var(--yellow)}
+.badge-red{background:rgba(255,61,90,.15);color:var(--red)}
+
+/* MARKETS */
+.mkt-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mkt-card{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:14px}
+.mkt-rows{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.mkt-row{display:flex;justify-content:space-between;align-items:center;padding:7px 9px;background:var(--surf2);border-radius:5px;font-size:12px}
+.mkt-odd{font-family:'DM Mono',monospace;font-size:13px;color:var(--accent)}
+.mkt-imp{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted)}
+
+/* FORM */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.form-card{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:14px}
+.team-name-f{font-size:12px;font-weight:600;margin-bottom:8px}
+.form-dots{display:flex;gap:5px}
+.fdot{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:11px;font-weight:500}
+.fdot-W{background:rgba(0,229,160,.2);color:var(--green);border:1px solid rgba(0,229,160,.3)}
+.fdot-D{background:rgba(255,184,0,.15);color:var(--yellow);border:1px solid rgba(255,184,0,.3)}
+.fdot-L{background:rgba(255,61,90,.15);color:var(--red);border:1px solid rgba(255,61,90,.3)}
+.stats-mini{margin-top:10px;display:flex;gap:8px}
+.sitem{text-align:center;flex:1;padding:6px;background:var(--surf2);border-radius:5px}
+.sval{font-family:'DM Mono',monospace;font-size:14px;color:var(--accent);display:block}
+.slbl{font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+
+/* H2H */
+.h2h-bar{display:flex;background:var(--surf);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px}
+.h2h-block{flex:1;padding:12px;text-align:center}
+.h2h-block+.h2h-block{border-left:1px solid var(--border)}
+.h2h-num{font-family:'Bebas Neue',sans-serif;font-size:26px;color:var(--accent);line-height:1}
+.h2h-lbl{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:3px}
+.h2h-rows{display:flex;flex-direction:column;gap:5px}
+.h2h-row{display:flex;align-items:center;padding:7px 10px;background:var(--surf);border:1px solid var(--border);border-radius:5px;font-size:11px;gap:8px}
+.h2h-date{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);min-width:65px}
+.h2h-teams{flex:1}
+.h2h-score{font-family:'DM Mono',monospace;font-size:13px;font-weight:500;min-width:36px;text-align:center}
+
+/* LOADING */
+.panel-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;gap:10px;color:var(--muted)}
+.big-spinner{width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+.loading-text{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px}
+
+/* ── DB PANE ─────────────────────────────────── */
+.db-pane{display:none;overflow-y:auto;max-height:calc(100vh - 120px);padding:24px 28px;grid-column:1/-1}
+.db-pane.active{display:block}
+
+.db-status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+.db-stat-card{background:var(--surf);border:1px solid var(--border);border-radius:10px;padding:18px;text-align:center}
+.db-stat-num{font-family:'Bebas Neue',sans-serif;font-size:38px;color:var(--accent);line-height:1}
+.db-stat-lbl{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:4px}
+.db-unavail{background:rgba(255,61,90,.08);border:1px solid rgba(255,61,90,.2);border-radius:10px;padding:20px;color:var(--danger);font-family:'DM Mono',monospace;font-size:12px;margin-bottom:20px;line-height:1.8}
+
+.db-filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.db-table-wrap{background:var(--surf);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{padding:10px 14px;background:var(--surf2);font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;text-align:left;border-bottom:1px solid var(--border)}
+tbody td{padding:9px 14px;border-bottom:1px solid rgba(30,37,53,.5)}
+tbody tr:hover{background:rgba(0,229,160,.03)}
+tbody tr:last-child td{border-bottom:none}
+.result-H{color:var(--green);font-weight:600}
+.result-D{color:var(--yellow);font-weight:600}
+.result-A{color:var(--red);font-weight:600}
+.db-pagination{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)}
+
+.leagues-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:20px}
+.league-chip{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
+.league-chip-name{font-size:12px;font-weight:500}
+.league-chip-num{font-family:'DM Mono',monospace;font-size:13px;color:var(--accent)}
+
+.collections-list{display:flex;flex-direction:column;gap:5px}
+.col-row{display:flex;align-items:center;gap:12px;padding:8px 12px;background:var(--surf);border:1px solid var(--border);border-radius:6px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)}
+.col-status-done{color:var(--green)}
+.col-status-partial{color:var(--yellow)}
+.col-status-error{color:var(--red)}
+
+.job-log-line-warn { color: var(--yellow); }
+.job-log-line-ok   { color: var(--green);  }
+.job-log-line-err  { color: var(--red);    }
+.job-log-line-info { color: var(--accent); }
+/* TOAST */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--surf2);border:1px solid var(--border);border-left:3px solid var(--accent);padding:10px 16px;border-radius:7px;font-family:'DM Mono',monospace;font-size:11px;color:var(--text);z-index:100;transform:translateY(50px);opacity:0;transition:all .3s}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.err{border-left-color:var(--danger)}
+
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+
+
+/* RELATÓRIO ESTATÍSTICO */
+.report-wrap{margin-top:4px}
+.report-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px}
+.rtab{padding:8px 16px;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.rtab:hover{color:var(--text)}
+.rtab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.rtab-content{display:none}
+.rtab-content.active{display:block}
+
+.highlights{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.hl-item{padding:8px 12px;border-radius:6px;font-size:12px;line-height:1.4}
+.hl-positive{background:rgba(0,229,160,.08);border:1px solid rgba(0,229,160,.15);color:var(--text)}
+.hl-negative{background:rgba(255,61,90,.08);border:1px solid rgba(255,61,90,.15);color:var(--text)}
+.hl-info{background:rgba(0,119,255,.08);border:1px solid rgba(0,119,255,.15);color:var(--text)}
+
+.stat-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:16px}
+.stat-table td{padding:7px 10px;border-bottom:1px solid rgba(30,37,53,.5)}
+.stat-table tr:last-child td{border-bottom:none}
+.stat-table tr:hover td{background:rgba(0,229,160,.03)}
+.stat-table .slabel{color:var(--muted);font-family:'DM Mono',monospace;font-size:10px;width:55%}
+.stat-table .sval{font-family:'DM Mono',monospace;font-size:12px;color:var(--accent);text-align:right;font-weight:500}
+.stat-table .sval.bad{color:var(--danger)}
+.stat-table .sval.warn{color:var(--yellow)}
+
+.form-mini{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.fm-dot{display:flex;flex-direction:column;align-items:center;gap:2px}
+.fm-r{width:24px;height:24px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:10px;font-weight:600}
+.fm-r.W{background:rgba(0,229,160,.2);color:var(--green);border:1px solid rgba(0,229,160,.3)}
+.fm-r.D{background:rgba(255,184,0,.15);color:var(--yellow);border:1px solid rgba(255,184,0,.3)}
+.fm-r.L{background:rgba(255,61,90,.15);color:var(--red);border:1px solid rgba(255,61,90,.3)}
+.fm-score{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted)}
+.fm-opp{font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);max-width:36px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.report-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.report-col-title{font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+
+.h2h-match-row{display:flex;align-items:center;padding:6px 10px;background:var(--surf);border:1px solid var(--border);border-radius:5px;font-size:11px;gap:8px;margin-bottom:4px}
+.h2h-mr-date{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);min-width:70px}
+.h2h-mr-teams{flex:1;display:flex;justify-content:space-between;align-items:center}
+.h2h-mr-score{font-family:'DM Mono',monospace;font-size:13px;font-weight:600;min-width:36px;text-align:center}
+.h2h-ht{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted)}
+
+.report-loading{padding:30px;text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)}
+.report-empty{padding:20px;text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);background:var(--surf);border:1px solid var(--border);border-radius:8px}
+
+.pct-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:4px}
+.pct-bar{flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.pct-fill{height:100%;border-radius:2px;background:var(--accent);transition:width .4s}
+.pct-fill.bad{background:var(--danger)}
+.pct-fill.warn{background:var(--yellow)}
+.pct-num{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);min-width:30px;text-align:right}
+
+/* LIVE ODDS PANEL */
+.live-odds-wrap{margin-bottom:28px}
+.bookmakers-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:10px}
+.bk-card{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:12px}
+.bk-name{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
+.bk-odds{display:flex;gap:6px}
+.bk-odd{flex:1;text-align:center;background:var(--surf2);border-radius:5px;padding:6px 4px}
+.bk-odd-val{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--text);display:block;line-height:1}
+.bk-odd-lbl{font-family:'DM Mono',monospace;font-size:8px;color:var(--muted);display:block;margin-top:2px}
+.bk-odd.best-odd{background:rgba(0,229,160,.12);border:1px solid rgba(0,229,160,.25)}
+.bk-odd.best-odd .bk-odd-val{color:var(--accent)}
+.consensus-bar{display:flex;background:var(--surf);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:10px}
+.cons-block{flex:1;padding:14px;text-align:center;border-right:1px solid var(--border)}
+.cons-block:last-child{border-right:none}
+.cons-val{font-family:'Bebas Neue',sans-serif;font-size:24px;line-height:1;color:var(--accent)}
+.cons-lbl{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:1px}
+.cons-best{font-family:'DM Mono',monospace;font-size:10px;color:var(--text);margin-top:4px}
+.odds-api-badge{font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);text-align:right;margin-top:6px}
+.value-highlight{padding:8px 12px;border-radius:6px;margin-top:8px;font-family:'DM Mono',monospace;font-size:11px;line-height:1.7}
+.value-highlight.positive{background:rgba(0,229,160,.1);border:1px solid rgba(0,229,160,.2);color:var(--green)}
+.value-highlight.negative{background:rgba(255,61,90,.08);border:1px solid rgba(255,61,90,.15);color:var(--muted)}
+.odds-loading{padding:20px;text-align:center;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)}
+
+/* EXPORT / IMPORT */
+.exim-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.exim-card{background:var(--surf);border:1px solid var(--border);border-radius:10px;padding:20px}
+.exim-title{font-family:'DM Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px}
+.exim-row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.exim-row .ctrl-label{min-width:70px}
+.drop-zone{border:2px dashed var(--border);border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:all .2s;margin-top:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);color:var(--accent);background:rgba(0,229,160,.04)}
+.import-result{margin-top:10px;padding:10px 14px;border-radius:6px;font-family:'DM Mono',monospace;font-size:11px;display:none}
+.import-result.ok{background:rgba(0,229,160,.1);color:var(--green);border:1px solid rgba(0,229,160,.2)}
+.import-result.err{background:rgba(255,61,90,.1);color:var(--danger);border:1px solid rgba(255,61,90,.2)}
+.progress-bar{height:4px;background:var(--border);border-radius:2px;margin-top:8px;overflow:hidden;display:none}
+.progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s;width:0%}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">FOOT<span>SCOUT</span></div>
+  <div class="hdr-right">
+    <div class="api-status" id="apiStatus"><span class="dot" id="apiDot"></span>A verificar...</div>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('fixtures')">⚽ Jogos</div>
+  <div class="tab" onclick="switchTab('database')">🗄 Base de Dados</div>
+  <div class="tab" onclick="switchTab('admin')">⚙ Gestão</div>
+</div>
+
+<!-- ── FIXTURES TAB CONTROLS ── -->
+<div class="controls" id="ctrlFixtures">
+  <span class="ctrl-label">DIAS:</span>
+  <select id="daysSelect">
+    <option value="1">Hoje</option>
+    <option value="2">+2 dias</option>
+    <option value="3" selected>+3 dias</option>
+    <option value="7">+7 dias</option>
+  </select>
+  <span class="ctrl-label" style="margin-left:8px">LIGA:</span>
+  <select id="leagueFilter">
+    <option value="all">Todas</option>
+    <option value="2">Champions League</option>
+    <option value="3">Europa League</option>
+    <option value="848">Conference League</option>
+    <option value="39">Premier League</option>
+    <option value="140">La Liga</option>
+    <option value="135">Serie A</option>
+    <option value="78">Bundesliga</option>
+    <option value="61">Ligue 1</option>
+    <option value="94">Primeira Liga</option>
+  </select>
+  <button class="btn-accent" id="refreshBtn" onclick="loadFixtures()">
+    <div class="spinner" id="refreshSpinner"></div>↻ Refresh
+  </button>
+</div>
+
+<!-- ── DATABASE TAB CONTROLS ── -->
+<div class="controls" id="ctrlDatabase" style="display:none">
+  <span class="ctrl-label">LIGA:</span>
+  <select id="dbLeague">
+    <option value="">Todas</option>
+    <option value="2">Champions League</option>
+    <option value="3">Europa League</option>
+    <option value="39">Premier League</option>
+    <option value="140">La Liga</option>
+    <option value="135">Serie A</option>
+    <option value="78">Bundesliga</option>
+    <option value="61">Ligue 1</option>
+    <option value="94">Primeira Liga</option>
+  </select>
+  <span class="ctrl-label">TEMPORADA:</span>
+  <select id="dbSeason">
+    <option value="">Todas</option>
+    <option value="2024">2024/25</option>
+    <option value="2023">2023/24</option>
+    <option value="2022">2022/23</option>
+    <option value="2021">2021/22</option>
+    <option value="2020">2020/21</option>
+  </select>
+  <span class="ctrl-label">RESULTADO:</span>
+  <select id="dbResult">
+    <option value="">Todos</option>
+    <option value="H">Casa</option>
+    <option value="D">Empate</option>
+    <option value="A">Fora</option>
+  </select>
+  <input type="text" id="dbTeam" placeholder="Pesquisar equipa..." style="width:160px">
+  <button class="btn-accent" onclick="loadDbMatches(1)">
+    <div class="spinner"></div>Pesquisar
+  </button>
+</div>
+
+<!-- ── MAIN ── -->
+<div class="main" id="mainGrid">
+
+  <!-- Fixtures pane -->
+  <div class="fixture-list" id="fixtureList">
+    <div class="empty-list">A carregar jogos...</div>
+  </div>
+  <div class="analysis-panel" id="analysisPanel">
+    <div class="empty-state">
+      <div class="empty-icon">⚽</div>
+      <div class="empty-text">Seleciona um jogo</div>
+    </div>
+  </div>
+
+  <!-- Database pane (spans full width) -->
+  <div class="db-pane" id="dbPane">
+
+
+    <div class="stitle">EXPORTAR / IMPORTAR</div>
+    <div class="exim-grid">
+
+      <!-- EXPORT -->
+      <div class="exim-card">
+        <div class="exim-title">⬇ Exportar Dados</div>
+        <div class="exim-row">
+          <span class="ctrl-label">TABELA:</span>
+          <select id="expTable">
+            <option value="ALL">⭐ Todas as tabelas (backup completo)</option>
+            <option value="matches">Jogos (matches)</option>
+            <option value="odds">Odds</option>
+            <option value="team_season_stats">Stats Equipas</option>
+            <option value="collection_log">Log de recolhas</option>
+          </select>
+        </div>
+        <div class="exim-row">
+          <span class="ctrl-label">TEMPORADA:</span>
+          <select id="expSeason">
+            <option value="">Todas</option>
+            <option value="2024">2024/25</option>
+            <option value="2023">2023/24</option>
+            <option value="2022">2022/23</option>
+            <option value="2021">2021/22</option>
+            <option value="2020">2020/21</option>
+          </select>
+        </div>
+        <div class="exim-row">
+          <span class="ctrl-label">LIGA:</span>
+          <select id="expLeague">
+            <option value="">Todas</option>
+            <option value="2">Champions League</option>
+            <option value="3">Europa League</option>
+            <option value="39">Premier League</option>
+            <option value="140">La Liga</option>
+            <option value="135">Serie A</option>
+            <option value="78">Bundesliga</option>
+            <option value="61">Ligue 1</option>
+            <option value="94">Primeira Liga</option>
+          </select>
+        </div>
+        <div class="exim-row">
+          <span class="ctrl-label">FORMATO:</span>
+          <select id="expFormat">
+            <option value="json">JSON</option>
+            <option value="csv">CSV</option>
+          </select>
+        </div>
+        <div class="exim-row">
+          <button class="btn-accent" onclick="doExport()" style="width:100%;justify-content:center">
+            ⬇ Exportar ficheiro
+          </button>
+        </div>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:4px;line-height:1.7">
+          <strong style="color:var(--accent)">"Todas as tabelas"</strong> exporta tudo num único ficheiro JSON — usa para backup ou para migrar para outro servidor.<br>
+          CSV individual compatível com Excel e Python/pandas.
+        </div>
+      </div>
+
+      <!-- IMPORT -->
+      <div class="exim-card">
+        <div class="exim-title">⬆ Importar Dados</div>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.7">
+          Importa ficheiros JSON exportados anteriormente.<br>
+          Registos duplicados são ignorados automaticamente.
+        </div>
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('importFile').click()">
+          📂 Clica ou arrasta um ficheiro JSON aqui
+        </div>
+        <input type="file" id="importFile" accept=".json" style="display:none" onchange="handleImportFile(this)">
+        <div class="progress-bar" id="importProgress"><div class="progress-fill" id="importFill"></div></div>
+        <div class="import-result" id="importResult"></div>
+      </div>
+
+    </div>
+    <div class="stitle">ESTADO DA BASE DE DADOS</div>
+    <div id="dbStatusArea"><div class="panel-loading"><div class="big-spinner"></div><div class="loading-text">A carregar...</div></div></div>
+
+    <div class="stitle" id="dbMatchesTitle" style="display:none">JOGOS</div>
+    <div id="dbMatchesArea"></div>
+
+  </div>
+  <!-- Admin pane -->
+  <div class="db-pane" id="adminPane">
+
+    <!-- API STATUS -->
+    <div class="stitle">ESTADO DAS FONTES DE DADOS</div>
+    <div id="sourcesStatus"><div class="panel-loading" style="height:80px"><div class="big-spinner"></div></div></div>
+
+    <!-- SOURCES CONFIG -->
+    <div class="stitle" style="margin-top:24px">CONFIGURAÇÃO DE FONTES</div>
+    <div id="sourcesConfig"></div>
+    <div style="margin-top:12px">
+      <button class="btn-accent" onclick="showAddSource()">+ Adicionar fonte</button>
+    </div>
+    <div id="addSourceForm" style="display:none;margin-top:12px">
+      <div class="exim-card">
+        <div class="exim-title">NOVA FONTE</div>
+        <div class="exim-row"><span class="ctrl-label">ID:</span><input id="newSrcId" placeholder="ex: openligadb" style="flex:1"></div>
+        <div class="exim-row"><span class="ctrl-label">NOME:</span><input id="newSrcName" placeholder="ex: OpenLigaDB" style="flex:1"></div>
+        <div class="exim-row"><span class="ctrl-label">TIPO:</span>
+          <select id="newSrcType"><option value="api-football">api-football</option><option value="football-data">football-data</option><option value="custom">custom</option></select>
+        </div>
+        <div class="exim-row"><span class="ctrl-label">API KEY:</span><input id="newSrcKey" type="password" placeholder="chave API" style="flex:1"></div>
+        <div class="exim-row"><span class="ctrl-label">URL:</span><input id="newSrcUrl" placeholder="https://..." style="flex:1"></div>
+        <div class="exim-row"><span class="ctrl-label">FUNÇÃO:</span>
+          <select id="newSrcRole"><option value="results,basic-stats">Resultados + Stats básicas</option><option value="odds,xg,advanced">Odds + xG + Avançado</option><option value="results">Só Resultados</option></select>
+        </div>
+        <div class="exim-row">
+          <button class="btn-accent" onclick="saveNewSource()">Guardar</button>
+          <button onclick="document.getElementById('addSourceForm').style.display='none'" style="margin-left:8px">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRIGGER COLLECTOR -->
+    <div class="stitle" style="margin-top:24px">DISPARAR RECOLHA</div>
+    <div class="exim-grid">
+      <div class="exim-card">
+        <div class="exim-title">🔵 API-FOOTBALL</div>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.7">
+          Odds · xG · Posse · Stats avançadas<br>Usa os 100 requests/dia
+        </div>
+        <div class="exim-row">
+          <span class="ctrl-label">MODO:</span>
+          <select id="triggerMainMode"><option value="daily">Daily (recentes)</option><option value="backfill">Backfill</option></select>
+          <select id="triggerMainSeason" style="display:none">
+            <option value="">Temporada atual</option>
+            <option value="2024">2024/25</option><option value="2023">2023/24</option>
+            <option value="2022">2022/23</option><option value="2021">2021/22</option>
+            <option value="2020">2020/21</option><option value="2019">2019/20</option>
+            <option value="2018">2018/19</option><option value="2017">2017/18</option>
+            <option value="2016">2016/17</option><option value="2015">2015/16</option>
+          </select>
+        </div>
+        <button class="btn-accent" onclick="triggerCollector('main')" style="width:100%;justify-content:center;margin-top:8px">▶ Iniciar</button>
+      </div>
+      <div class="exim-card">
+        <div class="exim-title">🟢 FOOTBALL-DATA.ORG</div>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.7">
+          Resultados · Stats básicas · Histórico até 2015<br>Sem limite diário
+        </div>
+        <div class="exim-row">
+          <span class="ctrl-label">MODO:</span>
+          <select id="triggerAltMode"><option value="daily">Daily (recentes)</option><option value="backfill">Backfill</option></select>
+          <select id="triggerAltSeason" style="display:none">
+            <option value="">Todas</option>
+            <option value="2024">2024/25</option><option value="2023">2023/24</option>
+            <option value="2022">2022/23</option><option value="2021">2021/22</option>
+            <option value="2020">2020/21</option><option value="2019">2019/20</option>
+            <option value="2018">2018/19</option><option value="2017">2017/18</option>
+            <option value="2016">2016/17</option><option value="2015">2015/16</option>
+          </select>
+        </div>
+        <button class="btn-accent" onclick="triggerCollector('alt')" style="width:100%;justify-content:center;margin-top:8px">▶ Iniciar</button>
+      </div>
+    </div>
+    <div id="triggerResult" style="display:none;margin-top:8px"></div>
+
+    <!-- COLLECTION LOG -->
+    <div class="stitle" style="margin-top:24px">LOG DE RECOLHAS</div>
+    <div id="collectionLog"><div class="panel-loading" style="height:60px"><div class="big-spinner"></div></div></div>
+
+    <!-- TEAM MAPPINGS -->
+    <div class="stitle" style="margin-top:24px">MAPEAMENTOS DE EQUIPAS</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+      <input type="text" id="mapSearch" placeholder="Pesquisar equipa..." style="flex:1" oninput="loadMappings(1)">
+      <button class="btn-accent" onclick="showAddMapping()">+ Adicionar</button>
+    </div>
+    <div id="addMappingForm" style="display:none;margin-bottom:12px">
+      <div class="exim-card">
+        <div class="exim-title">NOVO MAPEAMENTO MANUAL</div>
+        <div class="exim-row"><span class="ctrl-label">FONTE:</span><input id="mapSrcName" placeholder="nome na fonte (ex: PSG)" style="flex:1"></div>
+        <div class="exim-row"><span class="ctrl-label">CORRETO:</span><input id="mapCanName" placeholder="nome canónico (ex: Paris Saint-Germain FC)" style="flex:1"></div>
+        <div class="exim-row">
+          <button class="btn-accent" onclick="saveMapping()">Guardar</button>
+          <button onclick="document.getElementById('addMappingForm').style.display='none'" style="margin-left:8px">Cancelar</button>
+        </div>
+      </div>
+    </div>
+    <div id="mappingsArea"></div>
+
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────
+// O frontend está em :3501 (nginx) que faz proxy para a API em :3500
+// A rota /api/ é proxied pelo nginx — não precisamos do porto explícito
+const API = '';  // usa caminhos relativos — o nginx faz o proxy
+
+let allFixtures = [];
+let activeFixtureId = null;
+let currentTab = 'fixtures';
+let dbPage = 1;
+
+// ── Utils ────────────────────────────────────────────────────────────
+const fmt  = d => new Date(d).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'});
+const fmtD = d => new Date(d).toLocaleDateString('pt-PT',{weekday:'short',day:'numeric',month:'short'});
+const fmtKey = d => new Date(d).toISOString().split('T')[0];
+
+function toast(msg, isErr=false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr?' err':'');
+  setTimeout(()=>t.className='toast',3000);
+}
+
+function setLoading(on) {
+  const s = document.getElementById('refreshSpinner');
+  if(s) s.style.display = on?'block':'none';
+}
+
+// ── API health check ─────────────────────────────────────────────────
+async function checkApi() {
+  try {
+    const r = await fetch(`${API}/health`);
+    const d = await r.json();
+    const dot = document.getElementById('apiDot');
+    const status = document.getElementById('apiStatus');
+    if (d.apiKey) {
+      dot.className = 'dot';
+      status.innerHTML = '<span class="dot"></span>API OK · Key configurada';
+    } else {
+      dot.className = 'dot err';
+      status.innerHTML = '<span class="dot err"></span>API OK · Sem key';
+    }
+  } catch(e) {
+    document.getElementById('apiStatus').innerHTML = '<span class="dot err"></span>API inacessível';
+  }
+}
+
+// ── Tabs ─────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach((t,i)=> t.classList.toggle('active', (i===0&&tab==='fixtures')||(i===1&&tab==='database')||(i===2&&tab==='admin')));
+
+  const grid = document.getElementById('mainGrid');
+  const fixList = document.getElementById('fixtureList');
+  const analysis = document.getElementById('analysisPanel');
+  const dbPane = document.getElementById('dbPane');
+  const ctrlF = document.getElementById('ctrlFixtures');
+  const ctrlD = document.getElementById('ctrlDatabase');
+
+  if (tab === 'fixtures') {
+    grid.style.gridTemplateColumns = '330px 1fr';
+    fixList.style.display = '';
+    analysis.style.display = '';
+    dbPane.classList.remove('active');
+    ctrlF.style.display = '';
+    ctrlD.style.display = 'none';
+  } else {
+    const adminPane = document.getElementById('adminPane');
+    grid.style.gridTemplateColumns = '1fr';
+    fixList.style.display = 'none';
+    analysis.style.display = 'none';
+    adminPane.classList.remove('active');
+
+    if (tab === 'database') {
+      dbPane.classList.add('active');
+      ctrlF.style.display = 'none';
+      ctrlD.style.display = '';
+      loadDbStatus();
+    } else {
+      dbPane.classList.remove('active');
+      adminPane.classList.add('active');
+      ctrlF.style.display = 'none';
+      ctrlD.style.display = 'none';
+      loadAdminData();
+    }
+  }
+}
+
+// ── FIXTURES ─────────────────────────────────────────────────────────
+async function loadFixtures() {
+  setLoading(true);
+  const days = document.getElementById('daysSelect').value;
+  try {
+    const r = await fetch(`${API}/api/fixtures?days=${days}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+    allFixtures = await r.json();
+    renderFixtureList();
+    toast(`${allFixtures.length} jogos carregados`);
+  } catch(e) {
+    toast('Erro: ' + e.message, true);
+    document.getElementById('fixtureList').innerHTML = `<div class="empty-list" style="color:var(--danger)">Erro ao carregar jogos:<br><small>${e.message}</small></div>`;
+  } finally { setLoading(false); }
+}
+
+function renderFixtureList() {
+  const lf = document.getElementById('leagueFilter').value;
+  const filtered = lf==='all' ? allFixtures : allFixtures.filter(f=>String(f.league.id)===lf);
+  if (!filtered.length) {
+    document.getElementById('fixtureList').innerHTML = '<div class="empty-list">Sem jogos para o período/liga</div>';
+    return;
+  }
+  const groups = {};
+  filtered.forEach(f=>{const k=fmtKey(f.fixture.date);if(!groups[k])groups[k]=[];groups[k].push(f);});
+  let html='';
+  Object.keys(groups).sort().forEach(day=>{
+    html+=`<div class="day-header">${fmtD(day+'T12:00:00')}</div>`;
+    groups[day].forEach(f=>{
+      const active = f.fixture.id===activeFixtureId?' active':'';
+      html+=`<div class="fixture-card${active}" onclick="selectFixture('${f.fixture.id}')" data-id="${f.fixture.id}">
+        <div class="fix-league">${f.league.name}</div>
+        <div class="fix-teams">${f.teams.home.name}<br><small style="font-size:10px;color:var(--muted)">vs</small> ${f.teams.away.name}</div>
+        <div class="fix-meta"><span class="fix-time">${fmt(f.fixture.date)}</span></div>
+      </div>`;
+    });
+  });
+  document.getElementById('fixtureList').innerHTML = html;
+}
+
+async function selectFixture(id) {
+  activeFixtureId = String(id);
+  document.querySelectorAll('.fixture-card').forEach(el=>el.classList.toggle('active', el.dataset.id === String(id)));
+  document.getElementById('analysisPanel').innerHTML=`<div class="panel-loading"><div class="big-spinner"></div><div class="loading-text">A analisar...</div></div>`;
+  try {
+    const r = await fetch(`${API}/api/analysis/${id}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const analysisData = await r.json();
+    renderAnalysis(analysisData);
+    // Carrega relatório estatístico
+    loadReport(
+      analysisData.fixture?.teams?.home?.name,
+      analysisData.fixture?.teams?.away?.name
+    );
+
+    // Se o jogo vem do The Odds API, o ID já é o odds event ID
+    // Passa directamente para o painel de odds
+    if (analysisData._source === 'odds-api') {
+      // Odds já estão na análise via The Odds API — carrega o painel
+      loadLiveOdds(
+        id,
+        analysisData.fixture?.teams?.home?.name,
+        analysisData.fixture?.teams?.away?.name,
+        analysisData.fixture?.league?.id,
+        document.getElementById('liveOddsSection')
+      );
+    } else {
+      loadLiveOdds(
+        id,
+        analysisData.fixture?.teams?.home?.name,
+        analysisData.fixture?.teams?.away?.name,
+        analysisData.fixture?.league?.id,
+        document.getElementById('liveOddsSection')
+      );
+    }
+  } catch(e) {
+    document.getElementById('analysisPanel').innerHTML=`<div style="padding:20px;color:var(--danger);font-family:'DM Mono',monospace;font-size:12px">Erro: ${e.message}</div>`;
+  }
+}
+
+function renderAnalysis(d) {
+  const {fixture,odds,implied,estimated,value,h2h,teamStats} = d;
+  const home=fixture.teams.home.name, away=fixture.teams.away.name;
+
+  function ocard(label,odd,imp,est,val) {
+    const diff=(val.diff>0?'+':'')+val.diff.toFixed(1);
+    return `<div class="ocard value-${val.color}">
+      <div class="olabel">${label}</div>
+      <div class="ovalue ${!odd?'nd':''}">${odd||'N/D'}</div>
+      <div class="oprobs">
+        <div class="prob-item"><span class="prob-label">BOOKM.</span><span class="prob-val imp">${imp||'—'}%</span></div>
+        <div class="prob-item"><span class="prob-label">MODELO</span><span class="prob-val est">${est}%</span></div>
+      </div>
+      <div class="vbadge badge-${val.color}">${val.label} (${diff}%)</div>
+    </div>`;
+  }
+
+  function formDots(s){
+    if(!s)return '<span style="color:var(--muted);font-size:11px">Sem dados</span>';
+    return s.split('').map(c=>`<div class="fdot fdot-${c}">${c}</div>`).join('');
+  }
+
+  function h2hRows(ms){
+    if(!ms.length)return '<div style="color:var(--muted);font-size:11px;padding:8px">Sem dados</div>';
+    return ms.map(m=>{
+      const d=new Date(m.fixture.date).toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'2-digit'});
+      return `<div class="h2h-row"><span class="h2h-date">${d}</span><span class="h2h-teams">${m.teams.home.name} vs ${m.teams.away.name}</span><span class="h2h-score">${m.goals.home??'?'}–${m.goals.away??'?'}</span></div>`;
+    }).join('');
+  }
+
+  const hs=teamStats.home, as=teamStats.away;
+  const hFor=hs?.goals?.for?.average?.home||'—', hAgn=hs?.goals?.against?.average?.home||'—';
+  const aFor=as?.goals?.for?.average?.away||'—', aAgn=as?.goals?.against?.average?.away||'—';
+
+  document.getElementById('analysisPanel').innerHTML=`
+    <div class="match-header">
+      <div class="match-league-badge">⬡ ${fixture.league.name} · ${fixture.league.country}</div>
+      <div class="match-teams"><span>${home}</span><span class="vs-badge">VS</span><span>${away}</span></div>
+      <div class="match-meta-row">
+        <div>📅<span>${fmtD(fixture.fixture.date)}</span></div>
+        <div>⏱<span>${fmt(fixture.fixture.date)}</span></div>
+        <div>🏟<span>${fixture.fixture.venue?.name||'—'}</span></div>
+        <div>xG esp.<span>${estimated.totalExpected}</span></div>
+      </div>
+    </div>
+
+    <div class="stitle">1X2</div>
+    <div class="odds-grid">
+      ${ocard(home+' (1)',odds.matchWinner.homeOdd,implied.home,estimated.homeP,value.home)}
+      ${ocard('EMPATE (X)',odds.matchWinner.drawOdd,implied.draw,estimated.drawP,value.draw)}
+      ${ocard(away+' (2)',odds.matchWinner.awayOdd,implied.away,estimated.awayP,value.away)}
+    </div>
+
+    <div class="stitle">GOLOS & BTTS</div>
+    <div class="mkt-grid">
+      <div class="mkt-card">
+        <div class="olabel">OVER / UNDER 2.5</div>
+        <div class="mkt-rows">
+          <div class="mkt-row"><span>Over 2.5</span><span class="mkt-imp">${implied.over25}%</span><span class="mkt-odd">${odds.goals.over25Odd||'—'}</span></div>
+          <div class="mkt-row"><span>Under 2.5</span><span class="mkt-odd">${odds.goals.under25Odd||'—'}</span></div>
+          <div class="mkt-row" style="background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.1)"><span style="color:var(--accent)">Modelo</span><span class="mkt-odd">${estimated.over25P}%</span></div>
+        </div>
+      </div>
+      <div class="mkt-card">
+        <div class="olabel">AMBAS MARCAM</div>
+        <div class="mkt-rows">
+          <div class="mkt-row"><span>Sim</span><span class="mkt-imp">${implied.bttsYes}%</span><span class="mkt-odd">${odds.btts.bttsYesOdd||'—'}</span></div>
+          <div class="mkt-row"><span>Não</span><span class="mkt-odd">${odds.btts.bttsNoOdd||'—'}</span></div>
+          <div class="mkt-row" style="background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.1)"><span style="color:var(--accent)">Modelo</span><span class="mkt-odd">${estimated.bttsP}%</span></div>
+        </div>
+      </div>
+    </div>
+
+    ${odds.corners.length?`
+    <div class="stitle">CANTOS</div>
+    <div class="mkt-card"><div class="mkt-rows">${odds.corners.map(c=>`<div class="mkt-row"><span>${c.value}</span><span class="mkt-odd">${c.odd}</span></div>`).join('')}</div></div>`:''}
+
+    <div class="stitle">FORMA RECENTE (últimos 5)</div>
+    <div class="form-grid">
+      <div class="form-card"><div class="team-name-f">${home}</div><div class="form-dots">${formDots(hs?.form)}</div>
+        <div class="stats-mini"><div class="sitem"><span class="sval">${hFor}</span><span class="slbl">Gm/J casa</span></div><div class="sitem"><span class="sval">${hAgn}</span><span class="slbl">Gs/J casa</span></div></div>
+      </div>
+      <div class="form-card"><div class="team-name-f">${away}</div><div class="form-dots">${formDots(as?.form)}</div>
+        <div class="stats-mini"><div class="sitem"><span class="sval">${aFor}</span><span class="slbl">Gm/J fora</span></div><div class="sitem"><span class="sval">${aAgn}</span><span class="slbl">Gs/J fora</span></div></div>
+      </div>
+    </div>
+
+    <div class="stitle">HEAD TO HEAD (últimos ${h2h.stats.total} jogos)</div>
+    <div class="h2h-bar">
+      <div class="h2h-block"><div class="h2h-num">${h2h.stats.homeWins}</div><div class="h2h-lbl">${home}</div></div>
+      <div class="h2h-block"><div class="h2h-num">${h2h.stats.draws}</div><div class="h2h-lbl">Empates</div></div>
+      <div class="h2h-block"><div class="h2h-num">${h2h.stats.awayWins}</div><div class="h2h-lbl">${away}</div></div>
+      <div class="h2h-block"><div class="h2h-num">${h2h.stats.over25Pct}%</div><div class="h2h-lbl">Over 2.5</div></div>
+      <div class="h2h-block"><div class="h2h-num">${h2h.stats.bttsPct}%</div><div class="h2h-lbl">BTTS</div></div>
+    </div>
+    <div class="h2h-rows">${h2hRows(h2h.matches)}</div>
+  `;
+}
+
+// ── DATABASE ─────────────────────────────────────────────────────────
+async function loadDbStatus() {
+  document.getElementById('dbStatusArea').innerHTML=`<div class="panel-loading"><div class="big-spinner"></div><div class="loading-text">A carregar...</div></div>`;
+  try {
+    const r = await fetch(`${API}/api/db/status`);
+    const d = await r.json();
+
+    if (!d.available) {
+      document.getElementById('dbStatusArea').innerHTML=`
+        <div class="db-unavail">
+          ⚠ Base de dados não encontrada ou vazia.<br><br>
+          Para popular com dados históricos, corre no servidor:<br><br>
+          <code style="background:rgba(0,0,0,.3);padding:8px 12px;border-radius:4px;display:block;margin-top:8px">
+            docker compose run --rm collector node collect.js --mode=backfill --season=2024
+          </code><br>
+          <code style="background:rgba(0,0,0,.3);padding:8px 12px;border-radius:4px;display:block">
+            docker compose run --rm collector node collect.js --mode=status
+          </code>
+        </div>`;
+      return;
+    }
+
+    let html=`
+      <div class="db-status-grid">
+        <div class="db-stat-card"><div class="db-stat-num">${d.counts.matches.toLocaleString('pt-PT')}</div><div class="db-stat-lbl">Jogos</div></div>
+        <div class="db-stat-card"><div class="db-stat-num">${d.counts.odds.toLocaleString('pt-PT')}</div><div class="db-stat-lbl">Odds</div></div>
+        <div class="db-stat-card"><div class="db-stat-num">${d.counts.teams.toLocaleString('pt-PT')}</div><div class="db-stat-lbl">Equipas</div></div>
+      </div>
+      <div class="stitle">POR LIGA</div>
+      <div class="leagues-grid">
+        ${d.leagues.map(l=>`<div class="league-chip"><span class="league-chip-name">${l.league_name}</span><span class="league-chip-num">${l.jogos.toLocaleString('pt-PT')}</span></div>`).join('')}
+      </div>`;
+
+    if (d.recent_collections?.length) {
+      html+=`<div class="stitle">ÚLTIMAS RECOLHAS</div><div class="collections-list">
+        ${d.recent_collections.map(c=>`
+          <div class="col-row">
+            <span style="min-width:130px">${c.finished_at?.slice(0,16)||'—'}</span>
+            <span style="flex:1">${c.league_name}</span>
+            <span style="min-width:50px">${c.season}</span>
+            <span class="col-status-${c.status}">${c.status}</span>
+            <span>${(c.fixtures_count||0).toLocaleString()} jogos</span>
+          </div>`).join('')}
+      </div>`;
+    }
+
+    document.getElementById('dbStatusArea').innerHTML=html;
+
+    // Mostra a secção de jogos
+    document.getElementById('dbMatchesTitle').style.display='';
+    loadDbMatches(1);
+
+  } catch(e) {
+    document.getElementById('dbStatusArea').innerHTML=`<div style="color:var(--danger);font-family:'DM Mono',monospace;font-size:12px;padding:16px">Erro: ${e.message}</div>`;
+  }
+}
+
+async function loadDbMatches(page=1) {
+  dbPage=page;
+  const league = document.getElementById('dbLeague').value;
+  const season = document.getElementById('dbSeason').value;
+  const result = document.getElementById('dbResult').value;
+  const team   = document.getElementById('dbTeam').value;
+
+  let url=`${API}/api/db/matches?limit=30&page=${page}`;
+  if(league) url+=`&league_id=${league}`;
+  if(season) url+=`&season=${season}`;
+  if(result) url+=`&result=${result}`;
+  if(team)   url+=`&team=${encodeURIComponent(team)}`;
+
+  document.getElementById('dbMatchesArea').innerHTML=`<div class="panel-loading" style="height:80px"><div class="big-spinner"></div></div>`;
+
+  try {
+    const r=await fetch(url);
+    const d=await r.json();
+    if(!d.matches?.length){
+      document.getElementById('dbMatchesArea').innerHTML=`<div class="empty-list">Sem resultados. Corre o backfill primeiro.</div>`;
+      return;
+    }
+    let html=`<div class="db-table-wrap"><table>
+      <thead><tr>
+        <th>Data</th><th>Liga</th><th>Temp.</th>
+        <th>Casa</th><th>Res.</th><th>Fora</th>
+        <th>xG H</th><th>xG A</th>
+        <th>Remates</th><th>Cantos</th><th>Posse</th>
+      </tr></thead><tbody>
+      ${d.matches.map(m=>{
+        const date=new Date(m.date).toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'2-digit'});
+        const score=m.goals_home!==null?`${m.goals_home}–${m.goals_away}`:'—';
+        const rCls=m.result?`result-${m.result}`:'';
+        return `<tr>
+          <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${date}</td>
+          <td style="font-size:11px;color:var(--muted)">${m.league_name}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${m.season}</td>
+          <td>${m.home_name}</td>
+          <td style="text-align:center"><span class="${rCls}">${score}</span></td>
+          <td>${m.away_name}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--blue)">${m.xg_home??'—'}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--blue)">${m.xg_away??'—'}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${m.shots_home??'—'}/${m.shots_away??'—'}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${m.corners_home??'—'}/${m.corners_away??'—'}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${m.poss_home??'—'}%</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>
+      <div class="db-pagination">
+        <span>Total: ${d.total.toLocaleString('pt-PT')} jogos</span>
+        ${page>1?`<button onclick="loadDbMatches(${page-1})" style="padding:4px 10px">‹ Ant.</button>`:''}
+        <span>Pág. ${page} / ${d.pages}</span>
+        ${page<d.pages?`<button onclick="loadDbMatches(${page+1})" style="padding:4px 10px">Próx. ›</button>`:''}
+      </div>`;
+    document.getElementById('dbMatchesArea').innerHTML=html;
+  } catch(e) {
+    document.getElementById('dbMatchesArea').innerHTML=`<div style="color:var(--danger);padding:12px;font-size:12px">Erro: ${e.message}</div>`;
+  }
+}
+
+
+// ── EXPORT ───────────────────────────────────────────────────────────
+function doExport() {
+  const table  = document.getElementById('expTable').value;
+  const season = document.getElementById('expSeason').value;
+  const league = document.getElementById('expLeague').value;
+  const format = document.getElementById('expFormat').value;
+
+  let url = `${API}/api/db/export?table=${table}&format=${format}`;
+  if (season) url += `&season=${season}`;
+  if (league) url += `&league_id=${league}`;
+
+  // Trigger download via hidden link
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  toast('A exportar...');
+}
+
+// ── IMPORT ───────────────────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processImportFile(file);
+});
+
+function handleImportFile(input) {
+  if (input.files[0]) processImportFile(input.files[0]);
+}
+
+async function processImportFile(file) {
+  const result  = document.getElementById('importResult');
+  const progress = document.getElementById('importProgress');
+  const fill    = document.getElementById('importFill');
+
+  result.style.display = 'none';
+  progress.style.display = 'block';
+  fill.style.width = '20%';
+  dropZone.textContent = `A ler ${file.name}...`;
+
+  try {
+    const text = await file.text();
+    fill.style.width = '50%';
+
+    let payload;
+    try {
+      const parsed = JSON.parse(text);
+      // Formato exportado: { table, data: [...] }
+      if (parsed.table && Array.isArray(parsed.data)) {
+        payload = { table: parsed.table, data: parsed.data };
+      } else if (Array.isArray(parsed)) {
+        // Array direto — pede a tabela
+        const tbl = prompt('Qual a tabela de destino?\nmatches / odds / team_season_stats');
+        if (!tbl) { dropZone.textContent = '📂 Clica ou arrasta um ficheiro JSON aqui'; progress.style.display='none'; return; }
+        payload = { table: tbl, data: parsed };
+      } else {
+        throw new Error('Formato JSON não reconhecido');
+      }
+    } catch(e) {
+      throw new Error('Ficheiro JSON inválido: ' + e.message);
+    }
+
+    fill.style.width = '70%';
+    dropZone.textContent = `A importar ${payload.data.length.toLocaleString('pt-PT')} registos...`;
+
+    const r = await fetch(`${API}/api/db/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const d = await r.json();
+    fill.style.width = '100%';
+
+    if (!r.ok) throw new Error(d.error || 'Erro desconhecido');
+
+    result.className = 'import-result ok';
+    result.style.display = 'block';
+    result.textContent = `✓ Importados: ${d.imported.toLocaleString('pt-PT')} | Já existiam: ${d.skipped.toLocaleString('pt-PT')} | Total: ${d.total.toLocaleString('pt-PT')}`;
+
+    toast(`${d.imported.toLocaleString('pt-PT')} registos importados!`);
+
+    // Reload status after short delay
+    setTimeout(() => { loadDbStatus(); }, 1500);
+
+  } catch(e) {
+    result.className = 'import-result err';
+    result.style.display = 'block';
+    result.textContent = '✗ ' + e.message;
+    toast('Erro na importação', true);
+  } finally {
+    progress.style.display = 'none';
+    fill.style.width = '0%';
+    dropZone.textContent = '📂 Clica ou arrasta um ficheiro JSON aqui';
+    document.getElementById('importFile').value = '';
+  }
+}
+
+
+
+
+// ── RELATÓRIO ESTATÍSTICO ────────────────────────────────────────────
+
+async function loadReport(homeName, awayName) {
+  const section = document.getElementById('reportSection');
+  if (!section) return;
+
+  section.innerHTML = '<div class="report-loading"><div class="big-spinner" style="width:18px;height:18px;margin:0 auto 8px"></div>A calcular estatísticas...</div>';
+
+  try {
+    const r = await fetch(`${API}/api/report?home=${encodeURIComponent(homeName)}&away=${encodeURIComponent(awayName)}&n=30`);
+    const d = await r.json();
+
+    if (d.error) {
+      section.innerHTML = `<div class="report-empty">⚠ ${d.error}</div>`;
+      return;
+    }
+
+    section.innerHTML = buildReportHTML(d, homeName, awayName);
+    // Activate first tab
+    switchReportTab('home_home');
+
+  } catch(e) {
+    section.innerHTML = `<div class="report-empty" style="color:var(--danger)">Erro: ${e.message}</div>`;
+  }
+}
+
+function switchReportTab(tabId) {
+  document.querySelectorAll('.rtab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+  document.querySelectorAll('.rtab-content').forEach(c => c.classList.toggle('active', c.id === 'rtab_' + tabId));
+}
+
+function buildReportHTML(d, homeName, awayName) {
+  const { home, away, h2h } = d;
+
+  function formMini(matches) {
+    if (!matches?.length) return '<span style="color:var(--muted);font-size:11px">Sem dados</span>';
+    return '<div class="form-mini">' + matches.map(m => `
+      <div class="fm-dot">
+        <div class="fm-r ${m.result}">${m.result}</div>
+        <div class="fm-score">${m.score}</div>
+        <div class="fm-opp">${m.opponent?.split(' ')[0]||''}</div>
+      </div>`).join('') + '</div>';
+  }
+
+  function pctBar(val, invert = false) {
+    const cls = invert ? (val >= 50 ? 'bad' : val >= 30 ? 'warn' : '') : (val < 40 ? 'bad' : val < 60 ? 'warn' : '');
+    return `<div class="pct-bar-wrap">
+      <div class="pct-bar"><div class="pct-fill ${cls}" style="width:${val}%"></div></div>
+      <div class="pct-num">${val}%</div>
+    </div>`;
+  }
+
+  function highlights(hl) {
+    if (!hl?.length) return '<div style="color:var(--muted);font-size:11px;padding:8px">Sem dados suficientes</div>';
+    return '<div class="highlights">' + hl.map(h =>
+      `<div class="hl-item hl-${h.type}">${h.text}</div>`
+    ).join('') + '</div>';
+  }
+
+  function statsTable(stats) {
+    if (!stats) return '<div class="report-empty">Sem dados suficientes na base de dados para esta equipa.<br><small>O backfill irá preencher com o tempo.</small></div>';
+    const n = stats.n;
+
+    // Summary banner
+    const summaryHtml = `<div style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">Últimos ${n} jogos</span>
+      <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px">
+        <span style="color:var(--green)">${stats.wins}V</span>
+        <span style="color:var(--muted);margin:0 6px">·</span>
+        <span style="color:var(--yellow)">${stats.draws}E</span>
+        <span style="color:var(--muted);margin:0 6px">·</span>
+        <span style="color:var(--danger)">${stats.losses}D</span>
+      </span>
+      <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${stats.win_pct}% vitórias</span>
+    </div>`;
+
+    const rows = [
+      ['Vitórias', `${stats.wins} (${stats.win_pct}%)`, false],
+      ['Empates', `${stats.draws} (${stats.draw_pct}%)`, false],
+      ['Derrotas', `${stats.losses} (${stats.loss_pct}%)`, true],
+      ['Média golos marcados', stats.avg_scored, false],
+      ['Média golos sofridos', stats.avg_conceded, true],
+      ...(stats.avg_ht_scored !== null ? [['Média golos marcados (1ª parte)', stats.avg_ht_scored, false]] : []),
+      ...(stats.avg_ht_conceded !== null ? [['Média golos sofridos (1ª parte)', stats.avg_ht_conceded, true]] : []),
+      ['Marcou em', `${stats.scored_in}/${n} jogos`, false],
+      ...(stats.scored_ht_pct !== null ? [['Marcou na 1ª parte em', `${stats.scored_ht_pct}%`]] : []),
+      ['Folha limpa', `${stats.clean_sheets}/${n} jogos (${stats.clean_sheet_pct}%)`, false],
+      ...(stats.conceded_ht_pct !== null ? [['Sofreu golo 1ª parte em', `${stats.conceded_ht_pct}%`, true]] : []),
+      ['Ambas marcam (BTTS)', `${stats.btts_count}/${n} (${stats.btts_pct}%)`, false],
+      ['Over 1.5', `${stats.over15_pct}%`, false],
+      ['Over 2.5', `${stats.over25_pct}%`, false],
+      ['Over 3.5', `${stats.over35_pct}%`, false],
+      ...(stats.avg_xg_for ? [['xG médio marcado', stats.avg_xg_for, false]] : []),
+      ...(stats.avg_xg_against ? [['xG médio sofrido', stats.avg_xg_against, true]] : []),
+    ];
+
+    return summaryHtml + `<table class="stat-table"><tbody>` +
+      rows.map(([label, val, bad]) => `<tr>
+        <td class="slabel">${label}</td>
+        <td class="sval ${bad?'bad':''}">${val}</td>
+      </tr>`).join('') +
+    `</tbody></table>`;
+  }
+
+  function streakBadges(stats) {
+    if (!stats) return '';
+    const badges = [];
+    if (stats.win_streak >= 2) badges.push(`<span style="background:rgba(0,229,160,.15);color:var(--green);padding:3px 8px;border-radius:4px;font-family:'DM Mono',monospace;font-size:10px">🔥 ${stats.win_streak}V seguidas</span>`);
+    if (stats.unbeaten_streak >= 4 && stats.win_streak < stats.unbeaten_streak) badges.push(`<span style="background:rgba(0,119,255,.15);color:var(--blue);padding:3px 8px;border-radius:4px;font-family:'DM Mono',monospace;font-size:10px">💪 Invicto ${stats.unbeaten_streak}</span>`);
+    if (stats.clean_streak >= 2) badges.push(`<span style="background:rgba(0,229,160,.1);color:var(--green);padding:3px 8px;border-radius:4px;font-family:'DM Mono',monospace;font-size:10px">🛡 ${stats.clean_streak} folhas limpas</span>`);
+    if (stats.no_win_streak >= 3) badges.push(`<span style="background:rgba(255,61,90,.15);color:var(--danger);padding:3px 8px;border-radius:4px;font-family:'DM Mono',monospace;font-size:10px">⚠ Sem ganhar ${stats.no_win_streak}</span>`);
+    return badges.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${badges.join('')}</div>` : '';
+  }
+
+  function h2hSection() {
+    if (!h2h) return '<div class="report-empty">Sem dados de confrontos directos na base de dados.</div>';
+    return `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+        <div class="db-stat-card"><div class="db-stat-num" style="font-size:28px">${h2h.homeWins}</div><div class="db-stat-lbl">${homeName.split(' ')[0]}</div></div>
+        <div class="db-stat-card"><div class="db-stat-num" style="font-size:28px">${h2h.draws}</div><div class="db-stat-lbl">Empates</div></div>
+        <div class="db-stat-card"><div class="db-stat-num" style="font-size:28px">${h2h.awayWins}</div><div class="db-stat-lbl">${awayName.split(' ')[0]}</div></div>
+        <div class="db-stat-card"><div class="db-stat-num" style="font-size:28px">${h2h.avg_goals}</div><div class="db-stat-lbl">Média golos</div></div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <div style="flex:1;background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div class="slabel" style="margin-bottom:6px">Over 2.5</div>
+          ${pctBar(h2h.over25_pct)}
+        </div>
+        <div style="flex:1;background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:12px">
+          <div class="slabel" style="margin-bottom:6px">Ambas marcam</div>
+          ${pctBar(h2h.btts_pct)}
+        </div>
+      </div>
+      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:8px;letter-spacing:1px">CONFRONTOS DIRECTOS (últimos ${h2h.n})</div>
+      ${h2h.matches.map(m => `
+        <div class="h2h-match-row">
+          <span class="h2h-mr-date">${m.date||'—'}</span>
+          <div class="h2h-mr-teams">
+            <span style="font-weight:500">${m.home}</span>
+            <div style="text-align:center">
+              <div class="h2h-mr-score">${m.score}</div>
+              ${m.ht ? `<div class="h2h-ht">(${m.ht})</div>` : ''}
+            </div>
+            <span style="font-weight:500">${m.away}</span>
+          </div>
+          <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${m.league||''}</span>
+        </div>`).join('')}`;
+  }
+
+  return `
+    <div class="report-tabs">
+      <div class="rtab active" data-tab="home_home" onclick="switchReportTab('home_home')">🏠 ${homeName.split(' ')[0]} em Casa</div>
+      <div class="rtab" data-tab="away_away" onclick="switchReportTab('away_away')">✈ ${awayName.split(' ')[0]} Fora</div>
+      <div class="rtab" data-tab="h2h" onclick="switchReportTab('h2h')">⚔ H2H</div>
+      <div class="rtab" data-tab="away_home" onclick="switchReportTab('away_home')">🏠 ${awayName.split(' ')[0]} em Casa</div>
+      <div class="rtab" data-tab="home_away" onclick="switchReportTab('home_away')">✈ ${homeName.split(' ')[0]} Fora</div>
+    </div>
+
+    <div id="rtab_home_home" class="rtab-content active">
+      ${streakBadges(home.at_home.stats)}
+      ${highlights(home.at_home.highlights)}
+      <div class="stitle" style="margin-top:0">FORMA RECENTE — ${homeName} em casa</div>
+      ${formMini(home.at_home.stats?.form)}
+      <div class="stitle">ESTATÍSTICAS em casa (últimos ${home.at_home.stats?.n||0} jogos)</div>
+      ${statsTable(home.at_home.stats)}
+    </div>
+
+    <div id="rtab_away_away" class="rtab-content">
+      ${streakBadges(away.away.stats)}
+      ${highlights(away.away.highlights)}
+      <div class="stitle" style="margin-top:0">FORMA RECENTE — ${awayName} fora</div>
+      ${formMini(away.away.stats?.form)}
+      <div class="stitle">ESTATÍSTICAS fora (últimos ${away.away.stats?.n||0} jogos)</div>
+      ${statsTable(away.away.stats)}
+    </div>
+
+    <div id="rtab_h2h" class="rtab-content">
+      ${h2hSection()}
+    </div>
+
+    <div id="rtab_away_home" class="rtab-content">
+      ${streakBadges(away.at_home.stats)}
+      ${highlights(away.at_home.highlights)}
+      <div class="stitle" style="margin-top:0">FORMA RECENTE — ${awayName} em casa</div>
+      ${formMini(away.at_home.stats?.form)}
+      <div class="stitle">ESTATÍSTICAS em casa (últimos ${away.at_home.stats?.n||0} jogos)</div>
+      ${statsTable(away.at_home.stats)}
+    </div>
+
+    <div id="rtab_home_away" class="rtab-content">
+      ${streakBadges(home.away.stats)}
+      ${highlights(home.away.highlights)}
+      <div class="stitle" style="margin-top:0">FORMA RECENTE — ${homeName} fora</div>
+      ${formMini(home.away.stats?.form)}
+      <div class="stitle">ESTATÍSTICAS fora (últimos ${home.away.stats?.n||0} jogos)</div>
+      ${statsTable(home.away.stats)}
+    </div>
+  `;
+}
+
+// ── LIVE ODDS (The Odds API) ─────────────────────────────────────────
+
+async function loadLiveOdds(fixtureId, homeName, awayName, leagueId, panelEl) {
+  const section = document.getElementById('liveOddsSection');
+  if (!section) return;
+
+  section.innerHTML = '<div class="odds-loading"><div class="big-spinner" style="width:18px;height:18px;margin:0 auto 8px"></div>A carregar odds das casas de apostas...</div>';
+
+  try {
+    const r = await fetch(`${API}/api/odds/fixture/${fixtureId}`);
+    const d = await r.json();
+
+    if (!d.found) {
+      section.innerHTML = `<div class="odds-loading" style="color:var(--muted)">
+        ⏳ Odds ainda não disponíveis para este jogo<br>
+        <small>As casas de apostas publicam odds geralmente 3-7 dias antes do jogo</small>
+      </div>`;
+      return;
+    }
+
+    const h2h = d.h2h;
+    const totals = d.totals;
+
+    let html = '';
+
+    if (h2h) {
+      // Consensus bar — melhor odd, média, implied probability
+      const homeOut = h2h.outcomes[homeName] || h2h.outcomes[Object.keys(h2h.outcomes)[0]];
+      const drawOut = h2h.outcomes['Draw'];
+      const awayOut = h2h.outcomes[awayName] || h2h.outcomes[Object.keys(h2h.outcomes)[2]];
+
+      const imp = v => v ? (100/v).toFixed(1)+'%' : '—';
+      const overround = homeOut && drawOut && awayOut
+        ? ((100/homeOut.avg + 100/drawOut.avg + 100/awayOut.avg) - 100).toFixed(1)
+        : null;
+
+      html += `<div class="consensus-bar">
+        ${homeOut ? `<div class="cons-block">
+          <div class="cons-val">${homeOut.best}</div>
+          <div class="cons-lbl">Casa (melhor)</div>
+          <div class="cons-best">média ${homeOut.avg} · impl. ${imp(homeOut.avg)}</div>
+        </div>` : ''}
+        ${drawOut ? `<div class="cons-block">
+          <div class="cons-val">${drawOut.best}</div>
+          <div class="cons-lbl">Empate (melhor)</div>
+          <div class="cons-best">média ${drawOut.avg} · impl. ${imp(drawOut.avg)}</div>
+        </div>` : ''}
+        ${awayOut ? `<div class="cons-block">
+          <div class="cons-val">${awayOut.best}</div>
+          <div class="cons-lbl">Fora (melhor)</div>
+          <div class="cons-best">média ${awayOut.avg} · impl. ${imp(awayOut.avg)}</div>
+        </div>` : ''}
+        ${overround ? `<div class="cons-block">
+          <div class="cons-val" style="color:var(--yellow)">${overround}%</div>
+          <div class="cons-lbl">Margem bookmaker</div>
+          <div class="cons-best" style="color:var(--muted)">quanto a casa ganha</div>
+        </div>` : ''}
+      </div>`;
+
+      // Per-bookmaker breakdown
+      html += `<div class="bookmakers-grid">`;
+      const allBks = {};
+      for (const [outcomeName, out] of Object.entries(h2h.outcomes)) {
+        for (const bk of out.bookmakers) {
+          if (!allBks[bk.name]) allBks[bk.name] = {};
+          allBks[bk.name][outcomeName] = bk.price;
+        }
+      }
+
+      const outNames = Object.keys(h2h.outcomes);
+      const bestPrices = {};
+      outNames.forEach(n => { bestPrices[n] = Math.max(...h2h.outcomes[n].bookmakers.map(b=>b.price)); });
+
+      for (const [bkName, prices] of Object.entries(allBks)) {
+        html += `<div class="bk-card">
+          <div class="bk-name">${bkName}</div>
+          <div class="bk-odds">
+            ${outNames.map(n => {
+              const p = prices[n];
+              const isBest = p && p >= bestPrices[n];
+              const label = n === 'Draw' ? 'X' : n === homeName ? '1' : '2';
+              return `<div class="bk-odd ${isBest?'best-odd':''}">
+                <span class="bk-odd-val">${p||'—'}</span>
+                <span class="bk-odd-lbl">${label}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }
+      html += '</div>';
+    }
+
+    // Over/Under
+    if (totals?.outcomes) {
+      const over25 = Object.entries(totals.outcomes).find(([k]) => k.includes('2.5') && k.includes('ver'));
+      const under25 = Object.entries(totals.outcomes).find(([k]) => k.includes('2.5') && k.includes('nder'));
+      if (over25 || under25) {
+        html += `<div style="display:flex;gap:8px;margin-top:10px">
+          ${over25 ? `<div class="bk-card" style="flex:1">
+            <div class="bk-name">Over 2.5 — melhor odd</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent)">${over25[1].best}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">média ${over25[1].avg} · ${(100/over25[1].avg).toFixed(1)}% impl.</div>
+          </div>` : ''}
+          ${under25 ? `<div class="bk-card" style="flex:1">
+            <div class="bk-name">Under 2.5 — melhor odd</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent)">${under25[1].best}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">média ${under25[1].avg} · ${(100/under25[1].avg).toFixed(1)}% impl.</div>
+          </div>` : ''}
+        </div>`;
+      }
+    }
+
+    html += `<div class="odds-api-badge">Fonte: The Odds API · ${d.raw_bookmakers?.length||0} casas · atualizado há &lt;15min</div>`;
+    section.innerHTML = html;
+
+  } catch(e) {
+    section.innerHTML = `<div class="odds-loading" style="color:var(--danger)">Erro ao carregar odds: ${e.message}</div>`;
+  }
+}
+
+// ── ADMIN ────────────────────────────────────────────────────────────
+
+async function loadAdminData() {
+  loadSourcesStatus();
+  loadSourcesConfig();
+  loadCollectionLog();
+  loadMappings(1);
+}
+
+// Sources status
+async function loadSourcesStatus() {
+  document.getElementById('sourcesStatus').innerHTML = `<div class="panel-loading" style="height:80px"><div class="big-spinner"></div></div>`;
+  try {
+    const r = await fetch(`${API}/api/admin/sources/status`);
+    const sources = await r.json();
+
+    const html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:8px">
+      ${sources.map(s => {
+        const st = s.status;
+        const ok = st.ok;
+        const color = ok ? 'var(--green)' : 'var(--red)';
+        let details = '';
+        if (ok) {
+          if (st.requests_remaining !== undefined) {
+            const pct = Math.round((st.requests_remaining / (st.requests_limit||100)) * 100);
+            details = `
+              <div style="margin-top:8px">
+                <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:4px">
+                  <span>Requests hoje</span><span style="color:var(--text)">${st.requests_used} / ${st.requests_limit}</span>
+                </div>
+                <div style="height:4px;background:var(--border);border-radius:2px">
+                  <div style="height:100%;width:${100-pct}%;background:${pct>20?'var(--accent)':'var(--danger)'};border-radius:2px"></div>
+                </div>
+                <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-top:4px">
+                  Restantes: <span style="color:${pct>20?'var(--accent)':'var(--danger)'}">${st.requests_remaining}</span> · Plano: ${st.plan}
+                </div>
+              </div>`;
+          } else if (st.limit_daily === 'unlimited') {
+            details = `<div style="margin-top:6px;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">
+              Sem limite diário · ${st.requests_remaining_per_min ?? 10} req/min disponíveis
+            </div>`;
+          }
+        } else {
+          details = `<div style="margin-top:6px;font-family:'DM Mono',monospace;font-size:10px;color:var(--danger)">${st.error}</div>`;
+        }
+        return `<div class="exim-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <div style="font-size:13px;font-weight:600">${s.name}</div>
+            <span style="font-family:'DM Mono',monospace;font-size:9px;padding:2px 7px;border-radius:3px;background:${ok?'rgba(0,229,160,.15)':'rgba(255,61,90,.15)'};color:${color}">${ok?'ONLINE':'OFFLINE'}</span>
+          </div>
+          <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted)">${s.role}</div>
+          ${details}
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="text-align:right">
+      <button class="btn-accent" onclick="loadSourcesStatus()" style="font-size:11px;padding:5px 12px">↻ Atualizar</button>
+    </div>`;
+    document.getElementById('sourcesStatus').innerHTML = html;
+  } catch(e) {
+    document.getElementById('sourcesStatus').innerHTML = `<div style="color:var(--danger);font-family:'DM Mono',monospace;font-size:12px">Erro: ${e.message}</div>`;
+  }
+}
+
+// Sources config
+async function loadSourcesConfig() {
+  try {
+    const r = await fetch(`${API}/api/admin/sources`);
+    const sources = await r.json();
+    const html = `<div class="db-table-wrap"><table>
+      <thead><tr><th>Nome</th><th>Tipo</th><th>Função</th><th>Key</th><th>Estado</th><th>Ações</th></tr></thead>
+      <tbody>${sources.map(s => `
+        <tr>
+          <td style="font-weight:500">${s.name}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${s.type}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${s.role}</td>
+          <td style="font-family:'DM Mono',monospace;font-size:10px">${s.key_set ? s.key : '<span style="color:var(--danger)">não definida</span>'}</td>
+          <td><span style="font-family:'DM Mono',monospace;font-size:9px;padding:2px 6px;border-radius:3px;background:${s.enabled?'rgba(0,229,160,.15)':'rgba(255,61,90,.15)'};color:${s.enabled?'var(--green)':'var(--red)'}">${s.enabled?'ATIVO':'INATIVO'}</span></td>
+          <td>
+            <button onclick="toggleSource('${s.id}', ${!s.enabled})" style="padding:3px 8px;font-size:11px">${s.enabled?'Desativar':'Ativar'}</button>
+          </td>
+        </tr>`).join('')}
+      </tbody></table></div>`;
+    document.getElementById('sourcesConfig').innerHTML = html;
+  } catch(e) {}
+}
+
+async function toggleSource(id, enabled) {
+  await fetch(`${API}/api/admin/sources/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ enabled })
+  });
+  loadSourcesConfig();
+  toast(`Fonte ${enabled ? 'ativada' : 'desativada'}`);
+}
+
+function showAddSource() {
+  document.getElementById('addSourceForm').style.display = '';
+}
+
+async function saveNewSource() {
+  const id   = document.getElementById('newSrcId').value.trim();
+  const name = document.getElementById('newSrcName').value.trim();
+  const key  = document.getElementById('newSrcKey').value.trim();
+  const url  = document.getElementById('newSrcUrl').value.trim();
+  const type = document.getElementById('newSrcType').value;
+  const role = document.getElementById('newSrcRole').value;
+  if (!id || !name || !key) { toast('ID, nome e key são obrigatórios', true); return; }
+  await fetch(`${API}/api/admin/sources/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ name, type, key, url, role, enabled: true })
+  });
+  document.getElementById('addSourceForm').style.display = 'none';
+  loadSourcesConfig();
+  toast('Fonte adicionada!');
+}
+
+// Trigger collector
+document.getElementById && document.addEventListener('DOMContentLoaded', () => {
+  ['triggerMainMode','triggerAltMode'].forEach((id, i) => {
+    const sel = document.getElementById(id);
+    const seasonId = i === 0 ? 'triggerMainSeason' : 'triggerAltSeason';
+    if (sel) sel.addEventListener('change', () => {
+      document.getElementById(seasonId).style.display = sel.value === 'backfill' ? '' : 'none';
+    });
+  });
+});
+
+let logPollingInterval = null;
+let currentJobOffset = 0;
+
+async function triggerCollector(collector) {
+  const modeId   = collector === 'main' ? 'triggerMainMode'   : 'triggerAltMode';
+  const seasonId = collector === 'main' ? 'triggerMainSeason' : 'triggerAltSeason';
+  const mode   = document.getElementById(modeId)?.value   || 'daily';
+  const season = document.getElementById(seasonId)?.value || '';
+
+  // Stop any existing polling
+  if (logPollingInterval) { clearInterval(logPollingInterval); logPollingInterval = null; }
+  currentJobOffset = 0;
+
+  const r = await fetch(`${API}/api/admin/trigger`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ collector, mode, season: season || undefined })
+  });
+  const d = await r.json();
+
+  // Show log viewer
+  const el = document.getElementById('triggerResult');
+  el.style.display = '';
+  el.innerHTML = `
+    <div style="background:var(--surf);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:8px">
+      <div style="padding:10px 14px;background:var(--surf2);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--accent)">▶ ${d.message}</span>
+        <span id="jobStatus" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">A iniciar...</span>
+      </div>
+      <div id="jobLog" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--text);padding:12px 14px;max-height:300px;overflow-y:auto;white-space:pre-wrap;line-height:1.7;background:rgba(0,0,0,.3)">Aguarda...</div>
+    </div>`;
+
+  toast(d.message);
+
+  // Poll for log updates every 2s
+  const jobId = d.jobId;
+  if (!jobId) return;
+
+  logPollingInterval = setInterval(async () => {
+    try {
+      const lr = await fetch(`${API}/api/admin/job/${jobId}/log?offset=${currentJobOffset}`);
+      const ld = await lr.json();
+
+      if (ld.lines?.length) {
+        const logEl = document.getElementById('jobLog');
+        if (logEl) {
+          const colored = ld.lines.map(l => {
+            if (l.includes('⚠') || l.includes('Rate limit')) return `<span style="color:var(--yellow)">${l}</span>`;
+            if (l.includes('✓') || l.includes('Concluído') || l.includes('Done')) return `<span style="color:var(--green)">${l}</span>`;
+            if (l.includes('✗') || l.includes('Erro') || l.includes('FAILED')) return `<span style="color:var(--red)">${l}</span>`;
+            if (l.includes('📥') || l.includes('══')) return `<span style="color:var(--accent)">${l}</span>`;
+            return l;
+          }).join('\n');
+
+          if (currentJobOffset === 0) logEl.innerHTML = colored;
+          else logEl.innerHTML += '\n' + colored;
+          logEl.scrollTop = logEl.scrollHeight;
+        }
+        currentJobOffset = ld.offset;
+      }
+
+      const statusEl = document.getElementById('jobStatus');
+      if (ld.done) {
+        clearInterval(logPollingInterval);
+        logPollingInterval = null;
+        if (statusEl) statusEl.textContent = '✓ Concluído';
+        if (statusEl) statusEl.style.color = 'var(--green)';
+        loadCollectionLog();
+        loadSourcesStatus();
+      } else {
+        if (statusEl) statusEl.textContent = `A correr... (${currentJobOffset} linhas)`;
+      }
+    } catch(e) {
+      console.error('Poll error:', e);
+    }
+  }, 2000);
+}
+
+// Collection log
+async function loadCollectionLog() {
+  try {
+    const r = await fetch(`${API}/api/admin/collection-log?limit=40`);
+    const d = await r.json();
+    if (!d.logs?.length) {
+      document.getElementById('collectionLog').innerHTML = '<div class="empty-list">Sem recolhas ainda</div>';
+      return;
+    }
+    const html = `<div class="db-table-wrap"><table>
+      <thead><tr><th>Data</th><th>Fonte</th><th>Liga</th><th>Temp.</th><th>Estado</th><th>Jogos</th><th>Odds</th></tr></thead>
+      <tbody>${d.logs.map(l => `<tr>
+        <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${l.finished_at?.slice(0,16)||'—'}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--blue)">${l.source||'—'}</td>
+        <td style="font-size:12px">${l.league_name||'—'}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:10px">${l.season||'—'}</td>
+        <td><span class="col-status-${l.status}">${l.status}</span></td>
+        <td style="font-family:'DM Mono',monospace;font-size:11px">${l.fixtures||0}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${l.odds_count??'—'}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+    document.getElementById('collectionLog').innerHTML = html;
+  } catch(e) {}
+}
+
+// Mappings
+let mappingsPage = 1;
+
+async function loadMappings(page = 1) {
+  mappingsPage = page;
+  const q = document.getElementById('mapSearch')?.value || '';
+  try {
+    const r = await fetch(`${API}/api/admin/mappings?q=${encodeURIComponent(q)}&page=${page}&limit=30`);
+    const d = await r.json();
+    if (!d.mappings?.length) {
+      document.getElementById('mappingsArea').innerHTML = '<div class="empty-list">Sem mapeamentos ainda — crescem automaticamente com o backfill</div>';
+      return;
+    }
+    const html = `<div class="db-table-wrap"><table>
+      <thead><tr><th>Fonte</th><th>Nome na fonte</th><th>Nome canónico (BD)</th><th>Ações</th></tr></thead>
+      <tbody>${d.mappings.map(m => `<tr id="mrow-${m.id}">
+        <td style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)">${m.source}</td>
+        <td style="font-size:12px">${m.source_name}</td>
+        <td style="font-size:12px" id="mcan-${m.id}">${m.canonical_name||'—'}</td>
+        <td style="display:flex;gap:6px">
+          <button onclick="editMapping(${m.id},'${(m.canonical_name||'').replace(/'/g,"\\'")}','${m.source_name.replace(/'/g,"\\'")}' )" style="padding:3px 8px;font-size:11px">✏</button>
+          <button onclick="deleteMapping(${m.id})" style="padding:3px 8px;font-size:11px;color:var(--danger)">✕</button>
+        </td>
+      </tr>`).join('')}
+      </tbody></table></div>
+      <div class="db-pagination">
+        <span>${d.total} mapeamentos</span>
+        ${page>1?`<button onclick="loadMappings(${page-1})" style="padding:4px 10px">‹</button>`:''}
+        <span>Pág. ${page}/${d.pages}</span>
+        ${page<d.pages?`<button onclick="loadMappings(${page+1})" style="padding:4px 10px">›</button>`:''}
+      </div>`;
+    document.getElementById('mappingsArea').innerHTML = html;
+  } catch(e) {}
+}
+
+function editMapping(id, current, sourceName) {
+  const newName = prompt(`Corrigir mapeamento para "${sourceName}":\nNome canónico actual: ${current}\n\nNovo nome:`, current);
+  if (!newName || newName === current) return;
+  fetch(`${API}/api/admin/mappings/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ canonical_name: newName })
+  }).then(() => { loadMappings(mappingsPage); toast('Mapeamento corrigido'); });
+}
+
+async function deleteMapping(id) {
+  if (!confirm('Remover este mapeamento?')) return;
+  await fetch(`${API}/api/admin/mappings/${id}`, { method: 'DELETE' });
+  loadMappings(mappingsPage);
+  toast('Mapeamento removido');
+}
+
+function showAddMapping() {
+  document.getElementById('addMappingForm').style.display = '';
+}
+
+async function saveMapping() {
+  const src = document.getElementById('mapSrcName').value.trim();
+  const can = document.getElementById('mapCanName').value.trim();
+  if (!src || !can) { toast('Ambos os campos são obrigatórios', true); return; }
+  await fetch(`${API}/api/admin/mappings`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ source: 'football-data', source_name: src, canonical_name: can })
+  });
+  document.getElementById('addMappingForm').style.display = 'none';
+  document.getElementById('mapSrcName').value = '';
+  document.getElementById('mapCanName').value = '';
+  loadMappings(1);
+  toast('Mapeamento adicionado!');
+}
+
+// ── Init ────────────────────────────────────────────────────────
+document.getElementById('daysSelect').addEventListener('change', loadFixtures);
+document.getElementById('leagueFilter').addEventListener('change', renderFixtureList);
+document.getElementById('dbTeam').addEventListener('keydown', e=>{ if(e.key==='Enter') loadDbMatches(1); });
+
+checkApi();
+loadFixtures();
+</script>
+</body>
+</html>
