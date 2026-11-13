@@ -19,6 +19,8 @@ const axios    = require('axios');
 const Database = require('better-sqlite3');
 const path     = require('path');
 const fs       = require('fs');
+const { ensureSchema } = require('../shared/schema');
+const { similarity, syntheticFixtureId } = require('../shared/names');
 
 // ── Config ────────────────────────────────────────────────────
 const API_KEY  = process.env.FOOTBALL_DATA_KEY;
@@ -72,11 +74,7 @@ async function apiGet(endpoint, params = {}) {
 
 // ── Database ──────────────────────────────────────────────────
 function openDb() {
-  if (!fs.existsSync(DB_PATH)) {
-    log(`BD não encontrada: ${DB_PATH}`, 'error');
-    log('Corre primeiro: node collect.js --mode=status', 'error');
-    process.exit(1);
-  }
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
@@ -84,75 +82,7 @@ function openDb() {
 }
 
 function migrateDb(db) {
-  // Coluna source para rastrear origem dos dados
-  const cols = db.prepare('PRAGMA table_info(matches)').all().map(r => r.name);
-  if (!cols.includes('source')) {
-    db.exec(`ALTER TABLE matches ADD COLUMN source TEXT DEFAULT 'api-football'`);
-    log('Migração: adicionada coluna matches.source');
-  }
-
-  // Tabela de mapeamento de nomes entre fontes
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS team_name_map (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      source         TEXT NOT NULL,
-      source_name    TEXT NOT NULL,
-      canonical_name TEXT,
-      UNIQUE(source, source_name)
-    );
-
-    CREATE TABLE IF NOT EXISTS alt_collection_log (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      source          TEXT,
-      league_code     TEXT,
-      league_name     TEXT,
-      season          INTEGER,
-      status          TEXT,
-      fixtures_found  INTEGER DEFAULT 0,
-      inserted        INTEGER DEFAULT 0,
-      updated         INTEGER DEFAULT 0,
-      started_at      TEXT,
-      finished_at     TEXT DEFAULT (datetime('now')),
-      notes           TEXT
-    );
-  `);
-}
-
-// ── Fuzzy match entre nomes de equipas de fontes diferentes ──
-// Normaliza nome: remove sufixos comuns, acentos, pontuação
-function normalizeName(s) {
-  const suffixes = [' fc', ' cf', ' sc', ' ac', ' afc', ' fk', ' sk', ' if',
-                    ' club', ' football club', ' calcio', ' united', ' city'];
-  let n = s.toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
-    .replace(/[^a-z0-9 ]/g, ' ')
-    .replace(/\s+/g, ' ').trim();
-  for (const suf of suffixes) {
-    if (n.endsWith(suf)) { n = n.slice(0, -suf.length).trim(); break; }
-  }
-  return n;
-}
-
-function similarity(a, b) {
-  const na = normalizeName(a), nb = normalizeName(b);
-  if (na === nb) return 1.0;
-  if (na.includes(nb) || nb.includes(na)) return 0.9;
-
-  // Token overlap (palavras em comum)
-  const tA = new Set(na.split(' ').filter(w => w.length > 2));
-  const tB = new Set(nb.split(' ').filter(w => w.length > 2));
-  const tokenInter = [...tA].filter(w => tB.has(w)).length;
-  if (tA.size > 0 && tB.size > 0) {
-    const tokenScore = (2 * tokenInter) / (tA.size + tB.size);
-    if (tokenScore >= 0.7) return tokenScore;
-  }
-
-  // Bigram similarity como fallback
-  const bigrams = s => { const bg = new Set(); for (let i=0;i<s.length-1;i++) bg.add(s.slice(i,i+2)); return bg; };
-  const bgA = bigrams(na.replace(/ /g,'')), bgB = bigrams(nb.replace(/ /g,''));
-  if (bgA.size === 0 || bgB.size === 0) return 0;
-  const inter = [...bgA].filter(x => bgB.has(x)).length;
-  return (2 * inter) / (bgA.size + bgB.size);
+  ensureSchema(db);
 }
 
 function findExistingFixture(db, homeFd, awayFd, datePart, leagueId) {
@@ -293,13 +223,9 @@ function processMatches(db, matches, leagueId, leagueName, season) {
         fillNulls.run({ ...row, fixture_id: existing.fixture_id });
         updated++;
       } else {
-        // Jogo não existe — insere com ID sintético negativo
-        // Negativo para nunca colidir com IDs reais do API-Football
-        const synId = -Math.abs(
-          (leagueId * 1e8 + season * 1e4 +
-          parseInt(datePart.replace(/-/g,'').slice(-4)) +
-          (homeFd.charCodeAt(0) || 0) + (awayFd.charCodeAt(0) || 0)) % 2147483647
-        );
+        // Jogo não existe — insere com ID sintético negativo e estável
+        // (hash dos nomes completos; o antigo somava só a 1ª letra → colisões e jogos perdidos)
+        const synId = syntheticFixtureId(leagueId, datePart, homeFd, awayFd);
         insertNew.run({
           fixture_id: synId, season, league_id: leagueId, league_name: leagueName,
           date: m.utcDate, home_name: homeFd, away_name: awayFd, ...row,

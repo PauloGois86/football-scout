@@ -40,13 +40,16 @@ TMP=$(mktemp)
 crontab -l 2>/dev/null > "$TMP" || true
 
 # Remove entradas antigas se existirem
-grep -v "football-scout\|run-daily\|run-alt\|run-main" "$TMP" > "${TMP}.clean" && mv "${TMP}.clean" "$TMP" || true
+grep -v "football-scout\|run-daily\|run-alt\|run-main\|run-model" "$TMP" > "${TMP}.clean" && mv "${TMP}.clean" "$TMP" || true
 
 # Adiciona os dois crons
 # 03h00 — football-data.org (sem limite, corre antes)
 echo "0 3 * * * $SCRIPT_DIR/run-alt.sh" >> "$TMP"
 # 04h30 — API-Football (depois do reset UTC 01h00, com folga)
 echo "30 4 * * * $SCRIPT_DIR/run-main.sh" >> "$TMP"
+
+# Segunda 05h30 — import football-data.co.uk + backtest do modelo
+echo "30 5 * * 1 $SCRIPT_DIR/run-model.sh" >> "$TMP"
 
 crontab "$TMP"
 rm "$TMP"
@@ -60,6 +63,8 @@ echo "║           Sem limite diário — preenche tudo           ║"
 echo "║                                                       ║"
 echo "║  04:30 — API-Football (odds + xG + posse)             ║"
 echo "║           100 req/dia — usa só para o essencial       ║"
+echo "║                                                       ║"
+echo "║  Seg 05:30 — import histórico + backtest do modelo    ║"
 echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
 echo "Verifica:  crontab -l"

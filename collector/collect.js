@@ -15,6 +15,7 @@ const axios    = require('axios');
 const Database = require('better-sqlite3');
 const path     = require('path');
 const fs       = require('fs');
+const { ensureSchema } = require('../shared/schema');
 
 // ── Config ────────────────────────────────────────────────────
 const API_KEY  = process.env.API_FOOTBALL_KEY;
@@ -96,101 +97,7 @@ function addColumnIfMissing(db, table, col, type) {
 }
 
 function initDb(db) {
-  // Criar tabelas (CREATE IF NOT EXISTS é idempotente)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS matches (
-      fixture_id      INTEGER PRIMARY KEY,
-      season          INTEGER NOT NULL,
-      league_id       INTEGER NOT NULL,
-      league_name     TEXT,
-      date            TEXT NOT NULL,
-      status          TEXT,
-      home_id         INTEGER,
-      home_name       TEXT,
-      away_id         INTEGER,
-      away_name       TEXT,
-      goals_home      INTEGER,
-      goals_away      INTEGER,
-      result          TEXT,
-      ht_home         INTEGER,
-      ht_away         INTEGER,
-      shots_home      INTEGER,
-      shots_away      INTEGER,
-      shots_ot_home   INTEGER,
-      shots_ot_away   INTEGER,
-      poss_home       INTEGER,
-      poss_away       INTEGER,
-      corners_home    INTEGER,
-      corners_away    INTEGER,
-      fouls_home      INTEGER,
-      fouls_away      INTEGER,
-      yellows_home    INTEGER,
-      yellows_away    INTEGER,
-      reds_home       INTEGER,
-      reds_away       INTEGER,
-      xg_home         REAL,
-      xg_away         REAL,
-      collected_at    TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS odds (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      fixture_id      INTEGER NOT NULL,
-      bookmaker_id    INTEGER,
-      bookmaker_name  TEXT,
-      market          TEXT,
-      value           TEXT,
-      odd             REAL,
-      FOREIGN KEY (fixture_id) REFERENCES matches(fixture_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS team_season_stats (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      team_id           INTEGER,
-      team_name         TEXT,
-      season            INTEGER,
-      league_id         INTEGER,
-      played            INTEGER,
-      wins              INTEGER,
-      draws             INTEGER,
-      losses            INTEGER,
-      goals_for         INTEGER,
-      goals_against     INTEGER,
-      avg_goals_for     REAL,
-      avg_goals_against REAL,
-      clean_sheets      INTEGER,
-      form              TEXT,
-      collected_at      TEXT DEFAULT (datetime('now')),
-      UNIQUE(team_id, season, league_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS collection_log (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      league_id       INTEGER,
-      season          INTEGER,
-      status          TEXT,
-      fixtures_count  INTEGER,
-      odds_count      INTEGER,
-      started_at      TEXT,
-      finished_at     TEXT DEFAULT (datetime('now')),
-      notes           TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_matches_league_season ON matches(league_id, season);
-    CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_id, away_id);
-    CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);
-    CREATE INDEX IF NOT EXISTS idx_odds_fixture ON odds(fixture_id, market);
-    CREATE INDEX IF NOT EXISTS idx_team_stats ON team_season_stats(team_id, season);
-  `);
-
-  // ── Migrações — adiciona colunas que possam faltar em BDs antigas ──
-  addColumnIfMissing(db, 'matches',        'league_name',  'TEXT');
-  addColumnIfMissing(db, 'matches',        'xg_home',      'REAL');
-  addColumnIfMissing(db, 'matches',        'xg_away',      'REAL');
-  addColumnIfMissing(db, 'collection_log', 'league_name',  'TEXT');
-  addColumnIfMissing(db, 'collection_log', 'league_id',    'INTEGER');
-  addColumnIfMissing(db, 'collection_log', 'odds_count',   'INTEGER');
-
+  ensureSchema(db);   // esquema partilhado (shared/schema.js), idempotente
   log('Base de dados iniciada ✓');
 }
 
@@ -216,18 +123,18 @@ function prepareStatements(db) {
         @reds_home, @reds_away, @xg_home, @xg_away
       )
       ON CONFLICT(fixture_id) DO UPDATE SET
-        status=excluded.status,
-        league_name=excluded.league_name,
-        goals_home=excluded.goals_home, goals_away=excluded.goals_away,
-        result=excluded.result, ht_home=excluded.ht_home, ht_away=excluded.ht_away,
-        shots_home=excluded.shots_home, shots_away=excluded.shots_away,
-        shots_ot_home=excluded.shots_ot_home, shots_ot_away=excluded.shots_ot_away,
-        poss_home=excluded.poss_home, poss_away=excluded.poss_away,
-        corners_home=excluded.corners_home, corners_away=excluded.corners_away,
-        fouls_home=excluded.fouls_home, fouls_away=excluded.fouls_away,
-        yellows_home=excluded.yellows_home, yellows_away=excluded.yellows_away,
-        reds_home=excluded.reds_home, reds_away=excluded.reds_away,
-        xg_home=excluded.xg_home, xg_away=excluded.xg_away
+        status=COALESCE(excluded.status,status),
+        league_name=COALESCE(excluded.league_name,league_name),
+        goals_home=COALESCE(excluded.goals_home,goals_home), goals_away=COALESCE(excluded.goals_away,goals_away),
+        result=COALESCE(excluded.result,result), ht_home=COALESCE(excluded.ht_home,ht_home), ht_away=COALESCE(excluded.ht_away,ht_away),
+        shots_home=COALESCE(excluded.shots_home,shots_home), shots_away=COALESCE(excluded.shots_away,shots_away),
+        shots_ot_home=COALESCE(excluded.shots_ot_home,shots_ot_home), shots_ot_away=COALESCE(excluded.shots_ot_away,shots_ot_away),
+        poss_home=COALESCE(excluded.poss_home,poss_home), poss_away=COALESCE(excluded.poss_away,poss_away),
+        corners_home=COALESCE(excluded.corners_home,corners_home), corners_away=COALESCE(excluded.corners_away,corners_away),
+        fouls_home=COALESCE(excluded.fouls_home,fouls_home), fouls_away=COALESCE(excluded.fouls_away,fouls_away),
+        yellows_home=COALESCE(excluded.yellows_home,yellows_home), yellows_away=COALESCE(excluded.yellows_away,yellows_away),
+        reds_home=COALESCE(excluded.reds_home,reds_home), reds_away=COALESCE(excluded.reds_away,reds_away),
+        xg_home=COALESCE(excluded.xg_home,xg_home), xg_away=COALESCE(excluded.xg_away,xg_away)
     `),
 
     upsertOdd: db.prepare(`

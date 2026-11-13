@@ -2,8 +2,8 @@ services:
 
   api:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: football-scout-api
     restart: unless-stopped
     env_file: .env
@@ -33,8 +33,8 @@ services:
 
   collector:
     build:
-      context: ./collector
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: collector/Dockerfile
     container_name: football-scout-collector
     restart: "no"
     env_file: .env

@@ -105,6 +105,18 @@ input:focus{outline:none;border-color:var(--accent)}
 .badge-lime{background:rgba(163,230,53,.15);color:var(--lime)}
 .badge-yellow{background:rgba(255,184,0,.15);color:var(--yellow)}
 .badge-red{background:rgba(255,61,90,.15);color:var(--red)}
+.badge-gray{background:rgba(255,255,255,.06);color:var(--muted)}
+.ocard.value-gray::before{background:var(--border)}
+.model-box{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:6px}
+.model-row{display:flex;gap:18px;flex-wrap:wrap;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)}
+.model-row b{color:var(--text);font-weight:500}
+.score-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.score-chip{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-family:'DM Mono',monospace;font-size:11px}
+.conf-alta{color:var(--green)}.conf-média{color:var(--yellow)}.conf-baixa{color:var(--red)}
+.perf-table{width:100%;border-collapse:collapse;font-family:'DM Mono',monospace;font-size:11px;margin-bottom:14px}
+.perf-table th,.perf-table td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:right}
+.perf-table th:first-child,.perf-table td:first-child{text-align:left}
+.perf-note{font-size:11px;color:var(--muted);line-height:1.6;margin:6px 0 14px}
 
 /* MARKETS */
 .mkt-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -590,6 +602,17 @@ function toast(msg, isErr=false) {
   setTimeout(()=>t.className='toast',3000);
 }
 
+// ── Admin token (se ADMIN_TOKEN estiver definido no servidor) ──────
+async function adminFetch(url, opts = {}) {
+  const withToken = () => ({ ...opts, headers: { ...(opts.headers||{}), 'X-Admin-Token': localStorage.getItem('adminToken') || '' } });
+  let r = await fetch(url, withToken());
+  if (r.status === 401) {
+    const t = prompt('Token de administração (ADMIN_TOKEN):');
+    if (t) { localStorage.setItem('adminToken', t); r = await fetch(url, withToken()); }
+  }
+  return r;
+}
+
 function setLoading(on) {
   const s = document.getElementById('refreshSpinner');
   if(s) s.style.display = on?'block':'none';
@@ -735,6 +758,27 @@ async function selectFixture(id) {
   }
 }
 
+function modelBox(d) {
+  const m = d.model;
+  if (!m) return `<div class="model-box"><div class="model-row">⚠ Modelo indisponível — importa histórico (node import-fdcouk.js) para esta liga. A previsão mostrada é só a do mercado.</div></div>`;
+  const conf = m.confidence;
+  return `<div class="stitle">MODELO DIXON-COLES</div>
+    <div class="model-box">
+      <div class="model-row">
+        <div>Golos esperados <b>${m.xg.home} – ${m.xg.away}</b></div>
+        <div>Modelo puro <b>${m.pure.home}% / ${m.pure.draw}% / ${m.pure.away}%</b></div>
+        <div>Over 1.5 <b>${m.pure.over15}%</b> · 2.5 <b>${m.pure.over25}%</b> · 3.5 <b>${m.pure.over35}%</b></div>
+        <div>Confiança <b class="conf-${conf}">${conf}</b></div>
+      </div>
+      <div class="model-row" style="margin-top:6px">
+        <div>Peso do modelo na previsão final <b>${Math.round(m.weight*100)}%</b> (resto = mercado)</div>
+        <div>Treinado em <b>${m.trainedOn}</b> jogos</div>
+        ${(!m.teamsFound.home||!m.teamsFound.away)?`<div style="color:var(--yellow)">Equipa sem histórico: ${!m.teamsFound.home?d.fixture.teams.home.name:''} ${!m.teamsFound.away?d.fixture.teams.away.name:''}</div>`:''}
+      </div>
+      <div class="score-chips">${m.topScores.map(s=>`<span class="score-chip">${s.score} · ${s.p}%</span>`).join('')}</div>
+    </div>`;
+}
+
 function renderAnalysis(d) {
   const {fixture,odds,implied,estimated,value,h2h,teamStats} = d;
   const home=fixture.teams.home.name, away=fixture.teams.away.name;
@@ -745,10 +789,10 @@ function renderAnalysis(d) {
       <div class="olabel">${label}</div>
       <div class="ovalue ${!odd?'nd':''}">${odd||'N/D'}</div>
       <div class="oprobs">
-        <div class="prob-item"><span class="prob-label">BOOKM.</span><span class="prob-val imp">${imp||'—'}%</span></div>
-        <div class="prob-item"><span class="prob-label">MODELO</span><span class="prob-val est">${est}%</span></div>
+        <div class="prob-item"><span class="prob-label">MERCADO</span><span class="prob-val imp">${imp?imp+'%':'—'}</span></div>
+        <div class="prob-item"><span class="prob-label">PREVISÃO</span><span class="prob-val est">${est}%</span></div>
       </div>
-      <div class="vbadge badge-${val.color}">${val.label} (${diff}%)</div>
+      <div class="vbadge badge-${val.color}">${val.label}${val.ev!=null?` (EV ${diff}%)`:''}</div>
     </div>`;
   }
 
@@ -777,11 +821,13 @@ function renderAnalysis(d) {
         <div>📅<span>${fmtD(fixture.fixture.date)}</span></div>
         <div>⏱<span>${fmt(fixture.fixture.date)}</span></div>
         <div>🏟<span>${fixture.fixture.venue?.name||'—'}</span></div>
-        <div>xG esp.<span>${estimated.totalExpected}</span></div>
+        <div>Golos esp.<span>${estimated.totalExpected}</span></div>
       </div>
     </div>
 
-    <div class="stitle">1X2</div>
+    ${modelBox(d)}
+
+    <div class="stitle">1X2 ${odds.bookmakers?`<span style="color:var(--muted);font-weight:400">· melhor odd de ${odds.bookmakers} casas · margem ${implied.margin}%</span>`:''}</div>
     <div class="odds-grid">
       ${ocard(home+' (1)',odds.matchWinner.homeOdd,implied.home,estimated.homeP,value.home)}
       ${ocard('EMPATE (X)',odds.matchWinner.drawOdd,implied.draw,estimated.drawP,value.draw)}
@@ -793,17 +839,19 @@ function renderAnalysis(d) {
       <div class="mkt-card">
         <div class="olabel">OVER / UNDER 2.5</div>
         <div class="mkt-rows">
-          <div class="mkt-row"><span>Over 2.5</span><span class="mkt-imp">${implied.over25}%</span><span class="mkt-odd">${odds.goals.over25Odd||'—'}</span></div>
+          <div class="mkt-row"><span>Over 2.5</span><span class="mkt-imp">${implied.over25?implied.over25+'%':''}</span><span class="mkt-odd">${odds.goals.over25Odd||'—'}</span></div>
           <div class="mkt-row"><span>Under 2.5</span><span class="mkt-odd">${odds.goals.under25Odd||'—'}</span></div>
-          <div class="mkt-row" style="background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.1)"><span style="color:var(--accent)">Modelo</span><span class="mkt-odd">${estimated.over25P}%</span></div>
+          <div class="mkt-row" style="background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.1)"><span style="color:var(--accent)">Previsão</span><span class="mkt-odd">${estimated.over25P}%</span></div>
+          <div class="mkt-row"><span class="vbadge badge-${value.over25.color}">Over: ${value.over25.label}${value.over25.ev!=null?` (EV ${value.over25.diff}%)`:''}</span></div>
+          ${value.under25?`<div class="mkt-row"><span class="vbadge badge-${value.under25.color}">Under: ${value.under25.label}${value.under25.ev!=null?` (EV ${value.under25.diff}%)`:''}</span></div>`:''}
         </div>
       </div>
       <div class="mkt-card">
         <div class="olabel">AMBAS MARCAM</div>
         <div class="mkt-rows">
-          <div class="mkt-row"><span>Sim</span><span class="mkt-imp">${implied.bttsYes}%</span><span class="mkt-odd">${odds.btts.bttsYesOdd||'—'}</span></div>
+          <div class="mkt-row"><span>Sim</span><span class="mkt-imp">${implied.bttsYes?implied.bttsYes+'%':''}</span><span class="mkt-odd">${odds.btts.bttsYesOdd||'—'}</span></div>
           <div class="mkt-row"><span>Não</span><span class="mkt-odd">${odds.btts.bttsNoOdd||'—'}</span></div>
-          <div class="mkt-row" style="background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.1)"><span style="color:var(--accent)">Modelo</span><span class="mkt-odd">${estimated.bttsP}%</span></div>
+          <div class="mkt-row" style="background:rgba(0,229,160,.05);border:1px solid rgba(0,229,160,.1)"><span style="color:var(--accent)">Previsão</span><span class="mkt-odd">${estimated.bttsP}%</span></div>
         </div>
       </div>
     </div>
@@ -880,7 +928,9 @@ async function loadDbStatus() {
       </div>`;
     }
 
+    html += '<div id="perfArea"></div>';
     document.getElementById('dbStatusArea').innerHTML=html;
+    loadPerformance();
 
     // Mostra a secção de jogos
     document.getElementById('dbMatchesTitle').style.display='';
@@ -889,6 +939,29 @@ async function loadDbStatus() {
   } catch(e) {
     document.getElementById('dbStatusArea').innerHTML=`<div style="color:var(--danger);font-family:'DM Mono',monospace;font-size:12px;padding:16px">Erro: ${e.message}</div>`;
   }
+}
+
+async function loadPerformance() {
+  const el = document.getElementById('perfArea'); if (!el) return;
+  try {
+    const d = await (await fetch(`${API}/api/model/performance`)).json();
+    if (!d.available) { el.innerHTML = `<div class="stitle">DESEMPENHO DO MODELO</div><div class="perf-note">${d.message||'Sem backtest.'}</div>`; return; }
+    const p = x => x==null?'—':(x*100).toFixed(1)+'%';
+    const row = (name,a) => a&&a.n?`<tr><td>${name}</td><td>${a.n}</td><td>${p(a.accuracy)}</td><td>${a.logloss}</td><td>${a.rps}</td></tr>`:'';
+    let html = `<div class="stitle">DESEMPENHO DO MODELO (backtest walk-forward · ${d.generated_at.slice(0,10)})</div>
+      <div class="perf-note">Acerto = % de jogos em que o resultado mais provável aconteceu. <b>Logloss/RPS: menor é melhor</b> — são as métricas que interessam.
+      Se o modelo não bater o "Mercado", não há vantagem real a apostar. O <b>CLV</b> (odd apostada vs odd de fecho) é o melhor indicador de vantagem a longo prazo.</div>`;
+    for (const r of Object.values(d.leagues)) {
+      const t=r.one_x_two, ou=r.over_under_25, vb=r.value_bets;
+      html += `<div style="font-family:'DM Mono',monospace;font-size:12px;margin:8px 0">${r.label} — ${r.matches_tested} jogos (desde ${r.test_from_season})</div>
+      <table class="perf-table"><tr><th>1X2</th><th>n</th><th>Acerto</th><th>Logloss</th><th>RPS</th></tr>
+        ${row('Baseline (frequências)',t.baseline_freq)}${row('Modelo',t.model)}${row('Modelo (jogos c/ odds)',t.model_on_odds_subset)}${row('Mercado',t.market)}${row('Mistura',t.blend)}
+        ${row('O/U 2.5 — modelo',ou.model)}${row('O/U 2.5 — mercado',ou.market)}
+      </table>
+      ${t.market&&t.market.n?`<div class="perf-note">Apostas simuladas (EV &gt; ${p(vb.threshold)}): modelo ${vb.model.bets} apostas, ROI ${p(vb.model.roi)}, CLV ${p(vb.model.avg_clv)} · mistura ${vb.blend.bets} apostas, ROI ${p(vb.blend.roi)}, CLV ${p(vb.blend.avg_clv)}</div>`:''}`;
+    }
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = ''; }
 }
 
 async function loadDbMatches(page=1) {
@@ -1023,7 +1096,7 @@ async function processImportFile(file) {
     fill.style.width = '70%';
     dropZone.textContent = `A importar ${payload.data.length.toLocaleString('pt-PT')} registos...`;
 
-    const r = await fetch(`${API}/api/db/import`, {
+    const r = await adminFetch(`${API}/api/db/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -1392,7 +1465,7 @@ async function loadAdminData() {
 async function loadSourcesStatus() {
   document.getElementById('sourcesStatus').innerHTML = `<div class="panel-loading" style="height:80px"><div class="big-spinner"></div></div>`;
   try {
-    const r = await fetch(`${API}/api/admin/sources/status`);
+    const r = await adminFetch(`${API}/api/admin/sources/status`);
     const sources = await r.json();
 
     const html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:8px">
@@ -1446,7 +1519,7 @@ async function loadSourcesStatus() {
 // Sources config
 async function loadSourcesConfig() {
   try {
-    const r = await fetch(`${API}/api/admin/sources`);
+    const r = await adminFetch(`${API}/api/admin/sources`);
     const sources = await r.json();
     const html = `<div class="db-table-wrap"><table>
       <thead><tr><th>Nome</th><th>Tipo</th><th>Função</th><th>Key</th><th>Estado</th><th>Ações</th></tr></thead>
@@ -1467,7 +1540,7 @@ async function loadSourcesConfig() {
 }
 
 async function toggleSource(id, enabled) {
-  await fetch(`${API}/api/admin/sources/${id}`, {
+  await adminFetch(`${API}/api/admin/sources/${id}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ enabled })
   });
@@ -1487,7 +1560,7 @@ async function saveNewSource() {
   const type = document.getElementById('newSrcType').value;
   const role = document.getElementById('newSrcRole').value;
   if (!id || !name || !key) { toast('ID, nome e key são obrigatórios', true); return; }
-  await fetch(`${API}/api/admin/sources/${id}`, {
+  await adminFetch(`${API}/api/admin/sources/${id}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ name, type, key, url, role, enabled: true })
   });
@@ -1520,7 +1593,7 @@ async function triggerCollector(collector) {
   if (logPollingInterval) { clearInterval(logPollingInterval); logPollingInterval = null; }
   currentJobOffset = 0;
 
-  const r = await fetch(`${API}/api/admin/trigger`, {
+  const r = await adminFetch(`${API}/api/admin/trigger`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ collector, mode, season: season || undefined })
   });
@@ -1546,7 +1619,7 @@ async function triggerCollector(collector) {
 
   logPollingInterval = setInterval(async () => {
     try {
-      const lr = await fetch(`${API}/api/admin/job/${jobId}/log?offset=${currentJobOffset}`);
+      const lr = await adminFetch(`${API}/api/admin/job/${jobId}/log?offset=${currentJobOffset}`);
       const ld = await lr.json();
 
       if (ld.lines?.length) {
@@ -1587,7 +1660,7 @@ async function triggerCollector(collector) {
 // Collection log
 async function loadCollectionLog() {
   try {
-    const r = await fetch(`${API}/api/admin/collection-log?limit=40`);
+    const r = await adminFetch(`${API}/api/admin/collection-log?limit=40`);
     const d = await r.json();
     if (!d.logs?.length) {
       document.getElementById('collectionLog').innerHTML = '<div class="empty-list">Sem recolhas ainda</div>';
@@ -1616,7 +1689,7 @@ async function loadMappings(page = 1) {
   mappingsPage = page;
   const q = document.getElementById('mapSearch')?.value || '';
   try {
-    const r = await fetch(`${API}/api/admin/mappings?q=${encodeURIComponent(q)}&page=${page}&limit=30`);
+    const r = await adminFetch(`${API}/api/admin/mappings?q=${encodeURIComponent(q)}&page=${page}&limit=30`);
     const d = await r.json();
     if (!d.mappings?.length) {
       document.getElementById('mappingsArea').innerHTML = '<div class="empty-list">Sem mapeamentos ainda — crescem automaticamente com o backfill</div>';
@@ -1647,7 +1720,7 @@ async function loadMappings(page = 1) {
 function editMapping(id, current, sourceName) {
   const newName = prompt(`Corrigir mapeamento para "${sourceName}":\nNome canónico actual: ${current}\n\nNovo nome:`, current);
   if (!newName || newName === current) return;
-  fetch(`${API}/api/admin/mappings/${id}`, {
+  adminFetch(`${API}/api/admin/mappings/${id}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ canonical_name: newName })
   }).then(() => { loadMappings(mappingsPage); toast('Mapeamento corrigido'); });
@@ -1655,7 +1728,7 @@ function editMapping(id, current, sourceName) {
 
 async function deleteMapping(id) {
   if (!confirm('Remover este mapeamento?')) return;
-  await fetch(`${API}/api/admin/mappings/${id}`, { method: 'DELETE' });
+  await adminFetch(`${API}/api/admin/mappings/${id}`, { method: 'DELETE' });
   loadMappings(mappingsPage);
   toast('Mapeamento removido');
 }
@@ -1668,7 +1741,7 @@ async function saveMapping() {
   const src = document.getElementById('mapSrcName').value.trim();
   const can = document.getElementById('mapCanName').value.trim();
   if (!src || !can) { toast('Ambos os campos são obrigatórios', true); return; }
-  await fetch(`${API}/api/admin/mappings`, {
+  await adminFetch(`${API}/api/admin/mappings`, {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ source: 'football-data', source_name: src, canonical_name: can })
   });

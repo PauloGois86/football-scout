@@ -12,7 +12,11 @@
     "alt:status":       "node collect-alt.js --mode=status",
     "alt:backfill":     "node collect-alt.js --mode=backfill",
     "alt:backfill:2024":"node collect-alt.js --mode=backfill --season=2024",
-    "alt:daily":        "node collect-alt.js --mode=daily"
+    "alt:daily":        "node collect-alt.js --mode=daily",
+    "import:history":   "node import-fdcouk.js",
+    "backtest":         "node backtest.js",
+    "backtest:sim":     "node backtest.js --simulate",
+    "test":             "node --test ../shared/model.test.js"
   },
   "dependencies": {
     "axios": "^1.6.0",

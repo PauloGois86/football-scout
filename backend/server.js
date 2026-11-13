@@ -8,6 +8,10 @@ const Database   = require('better-sqlite3');
 const path       = require('path');
 const fs         = require('fs');
 const { spawn }  = require('child_process');
+const crypto     = require('crypto');
+const Model      = require('../shared/model');
+const { normalizeName, bestMatch } = require('../shared/names');
+const { loadMatches, EUROPEAN } = require('../shared/dataset');
 
 const app = express();
 app.use(cors());
@@ -19,6 +23,12 @@ const ODDS_API_KEY  = process.env.ODDS_API_KEY       || '';
 const FD_KEY        = process.env.FOOTBALL_DATA_KEY  || '';
 const DB_PATH       = process.env.DB_PATH || path.join(__dirname, '../data/football.db');
 const SOURCES_PATH  = process.env.SOURCES_CONFIG || '/data/sources.json';
+const ADMIN_TOKEN   = process.env.ADMIN_TOKEN || '';
+// Peso do modelo na mistura com o mercado (0 = só mercado, 1 = só modelo).
+// O mercado é difícil de bater — por defeito o modelo pesa menos que as odds.
+const MODEL_WEIGHT  = Math.min(1, Math.max(0, parseFloat(process.env.MODEL_WEIGHT ?? '0.35')));
+const EV_THRESHOLD  = parseFloat(process.env.EV_THRESHOLD ?? '0.03');
+const PERF_PATH     = path.join(path.dirname(DB_PATH), 'model-performance.json');
 
 // ── Caches ────────────────────────────────────────────────────
 const cache        = new NodeCache({ stdTTL: 1800 });   // generic 30min
@@ -59,7 +69,7 @@ const TRACKED_LEAGUES = [
 ];
 
 // The Odds API — no Conference League on free plan
-const ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
+const ODDS_API_BASE = process.env.ODDS_API_BASE || 'https://api.the-odds-api.com/v4';
 const ODDS_API_MAP  = {
   2:   'soccer_uefa_champs_league',
   3:   'soccer_uefa_europa_league',
@@ -82,35 +92,51 @@ function impliedProb(odd) {
   return odd > 0 ? parseFloat(((1 / odd) * 100).toFixed(1)) : 0;
 }
 
-function valueRating(implied, estimated) {
-  const diff = estimated - implied;
-  if (diff > 10) return { label: 'HIGH VALUE', color: 'green',  diff };
-  if (diff > 4)  return { label: 'VALUE',      color: 'lime',   diff };
-  if (diff > 0)  return { label: 'SLIGHT',     color: 'yellow', diff };
-  return              { label: 'NO VALUE',   color: 'red',    diff };
+function valueRating(ev, hasOdds = true) {
+  if (!hasOdds || ev == null) return { label: 'SEM ODDS', color: 'gray', diff: 0, ev: null };
+  const diff = +(ev * 100).toFixed(1);
+  if (ev >= 0.08)         return { label: 'HIGH VALUE', color: 'green',  diff, ev };
+  if (ev >= EV_THRESHOLD) return { label: 'VALUE',      color: 'lime',   diff, ev };
+  if (ev > 0)             return { label: 'SLIGHT',     color: 'yellow', diff, ev };
+  return                         { label: 'NO VALUE',   color: 'red',    diff, ev };
 }
 
-function estimateProbs(homeStats, awayStats) {
-  let homeP = 45, drawP = 27, awayP = 28;
-  const applyForm = (stats, side) => {
-    if (!stats?.form) return;
-    const w = (stats.form.match(/W/g)||[]).length;
-    const d = (stats.form.match(/D/g)||[]).length;
-    if (side === 'home') { homeP += w*2 + d*0.5; awayP -= w*1.5; }
-    else                 { awayP += w*2 + d*0.5; homeP -= w*1.5; }
-  };
-  applyForm(homeStats, 'home');
-  applyForm(awayStats, 'away');
-  const hAvg    = parseFloat(homeStats?.goals?.for?.average?.home || 1.5);
-  const aAvg    = parseFloat(awayStats?.goals?.for?.average?.away || 1.2);
-  const total   = hAvg + aAvg;
-  const over25P = total > 3.0 ? 68 : total > 2.5 ? 58 : total > 2.0 ? 45 : 35;
-  const bttsP   = Math.round((hAvg > 1 ? 0.75 : 0.60) * (aAvg > 0.8 ? 0.65 : 0.50) * 100);
-  const t       = homeP + drawP + awayP;
-  homeP = Math.round((homeP/t)*100);
-  drawP = Math.round((drawP/t)*100);
-  awayP = 100 - homeP - drawP;
-  return { homeP, drawP, awayP, over25P, bttsP, totalExpected: total.toFixed(2) };
+// ── Modelo (Dixon-Coles) ──────────────────────────────────────
+// Ajustado on-demand por liga e guardado em cache 6h.
+const modelCache = new NodeCache({ stdTTL: 21600 });
+
+function getModel(leagueId) {
+  const database = getDb();
+  if (!database) return null;
+  const european = EUROPEAN.has(+leagueId);
+  const cKey = european ? 'model_eu' : `model_${leagueId}`;
+  const hit = modelCache.get(cKey);
+  if (hit !== undefined) return hit;
+  let fitted = null;
+  try {
+    // Domésticas: só jogos dessa liga. Europeias: todos os jogos (as competições europeias ligam as ligas).
+    const matches = loadMatches(database, european ? {} : { leagueIds: [+leagueId] });
+    fitted = Model.fit(matches);
+    if (fitted) console.log(`Modelo ${cKey}: ${fitted.nMatches} jogos, ${Object.keys(fitted.teams).length} equipas, γ=${fitted.gamma.toFixed(2)} ρ=${fitted.rho.toFixed(3)}`);
+  } catch (e) { console.warn('Erro a ajustar modelo:', e.message); }
+  modelCache.set(cKey, fitted);
+  return fitted;
+}
+
+function resolveTeam(model, name) {
+  if (!model || !name) return null;
+  const key = normalizeName(name);
+  if (model.teams[key]) return { key, score: 1 };
+  const m = bestMatch(name, Object.keys(model.teams), 0.75);
+  return m ? { key: m.name, score: m.score } : null;
+}
+
+function modelPrediction(leagueId, homeName, awayName) {
+  const model = getModel(leagueId);
+  if (!model) return null;
+  const h = resolveTeam(model, homeName), a = resolveTeam(model, awayName);
+  const p = Model.predict(model, h?.key || `?${homeName}`, a?.key || `?${awayName}`);
+  return { ...p, homeKey: h?.key || null, awayKey: a?.key || null, nMatches: model.nMatches, gamma: model.gamma, rho: model.rho };
 }
 
 // ── The Odds API helpers ──────────────────────────────────────
@@ -177,8 +203,22 @@ function parseOddsEvent(ev, market) {
 //  ROUTES
 // ══════════════════════════════════════════════════════════════
 
+// ── Autenticação admin ────────────────────────────────────────
+// Se ADMIN_TOKEN estiver definido, rotas que escrevem/gerem exigem o header X-Admin-Token.
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a)), y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+function requireAdmin(req, res, next) {
+  if (!ADMIN_TOKEN) return next();
+  if (safeEqual(req.get('x-admin-token') || '', ADMIN_TOKEN)) return next();
+  res.status(401).json({ error: 'Token de admin inválido ou em falta' });
+}
+app.use('/api/admin', requireAdmin);
+app.post('/api/db/import', requireAdmin);
+
 // GET /health
-app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date(), apiKey: !!API_KEY, oddsKey: !!ODDS_API_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date(), apiKey: !!API_KEY, oddsKey: !!ODDS_API_KEY, adminAuth: !!ADMIN_TOKEN }));
 
 // GET /api/leagues
 app.get('/api/leagues', (req, res) => res.json(TRACKED_LEAGUES));
@@ -306,7 +346,7 @@ app.get('/api/analysis/:fixtureId', async (req, res) => {
       leagueId = fixture.league.id;
     }
 
-    // ── Stats from local DB ───────────────────────────────────
+    // ── Stats from local DB (forma / médias — informativo) ─────
     const database  = getDb();
     let homeStats   = {}, awayStats = {};
     let h2hMatches  = [];
@@ -320,8 +360,8 @@ app.get('/api/analysis/:fixtureId', async (req, res) => {
 
       const toStats = (s, venue) => s ? {
         goals: {
-          for:     { average: { [venue]: (s.goals_for     / Math.max(s.played/2,1)).toFixed(2) } },
-          against: { average: { [venue]: (s.goals_against / Math.max(s.played/2,1)).toFixed(2) } },
+          for:     { average: { [venue]: (s.goals_for     / Math.max(s.played,1)).toFixed(2) } },
+          against: { average: { [venue]: (s.goals_against / Math.max(s.played,1)).toFixed(2) } },
         },
         form: s.form || '',
       } : {};
@@ -330,70 +370,118 @@ app.get('/api/analysis/:fixtureId', async (req, res) => {
       awayStats  = toStats(aSt, 'away');
       h2hMatches = database.prepare(`
         SELECT * FROM matches
-        WHERE (home_name LIKE ? AND away_name LIKE ?) OR (home_name LIKE ? AND away_name LIKE ?)
+        WHERE result IS NOT NULL AND ((home_name LIKE ? AND away_name LIKE ?) OR (home_name LIKE ? AND away_name LIKE ?))
         ORDER BY date DESC LIMIT 10
       `).all(`%${hKey}%`,`%${aKey}%`,`%${aKey}%`,`%${hKey}%`);
     }
 
-    // ── H2H stats ────────────────────────────────────────────
+    // ── H2H — contado na perspectiva das equipas DESTE jogo ──
     let h2hHW=0, h2hD=0, h2hAW=0, h2hO25=0, h2hBTTS=0;
+    const hNorm = normalizeName(homeName);
     for (const m of h2hMatches) {
-      if (m.result==='H') h2hHW++; else if (m.result==='D') h2hD++; else h2hAW++;
+      const sameOrientation = normalizeName(m.home_name) === hNorm || m.home_name.toLowerCase().includes(homeName.split(' ')[0].toLowerCase());
+      if (m.result==='D') h2hD++;
+      else if ((m.result==='H') === sameOrientation) h2hHW++; else h2hAW++;
       if ((m.goals_home||0)+(m.goals_away||0) > 2.5) h2hO25++;
       if ((m.goals_home||0)>0 && (m.goals_away||0)>0) h2hBTTS++;
     }
     const h2hN = h2hMatches.length || 1;
 
-    // ── Odds from API-Football (may be empty on free plan) ───
-    let parsedOdds = {};
-    if (!isOddsApi && API_KEY) {
+    // ── Odds de mercado ──────────────────────────────────────
+    // best = melhor preço disponível (para apostar); avg = média (para estimar a prob. justa do mercado)
+    const mk = { home:{}, draw:{}, away:{}, over25:{}, under25:{}, bttsYes:{}, bttsNo:{}, books: 0, source: null };
+    let cornersB = [], parsedOdds = {};
+
+    if (isOddsApi) {
+      const events = await fetchLiveOdds(leagueId);
+      const ev = events?.find(e => e.id === fixtureId) || matchOddsEvent(events, homeName, awayName);
+      if (ev) {
+        const h2hO = parseOddsEvent(ev, 'h2h');
+        const tot  = parseOddsEvent(ev, 'totals');
+        const pick = (o) => o ? { best: o.best, avg: o.avg } : {};
+        if (h2hO) {
+          mk.home = pick(h2hO.outcomes[ev.home_team]); mk.away = pick(h2hO.outcomes[ev.away_team]);
+          mk.draw = pick(h2hO.outcomes['Draw']); mk.books = h2hO.books_count; mk.source = 'the-odds-api';
+        }
+        // totals: só a linha 2.5
+        const line25 = (ev.bookmakers||[]).flatMap(b => (b.markets||[]).filter(m=>m.key==='totals').flatMap(m=>m.outcomes||[])).filter(o => +o.point === 2.5);
+        const agg = name => { const ps = line25.filter(o=>o.name===name).map(o=>+o.price); return ps.length ? { best: Math.max(...ps), avg: ps.reduce((a,b)=>a+b,0)/ps.length } : {}; };
+        if (tot) { mk.over25 = agg('Over'); mk.under25 = agg('Under'); }
+      }
+    } else if (API_KEY) {
       try {
         const or = await apiClient.get('/odds', { params: { fixture: fixtureId, bookmaker: 6 } });
         const bets = or.data.response?.[0]?.bookmakers?.[0]?.bets || [];
         bets.forEach(b => { parsedOdds[b.name] = b.values; });
       } catch {}
+      const getOdd = (arr, val) => { const o = parseFloat((arr||[]).find(v=>v.value===val)?.odd||0); return o > 1 ? { best: o, avg: o } : {}; };
+      mk.home = getOdd(parsedOdds['Match Winner'], 'Home'); mk.draw = getOdd(parsedOdds['Match Winner'], 'Draw'); mk.away = getOdd(parsedOdds['Match Winner'], 'Away');
+      mk.over25 = getOdd(parsedOdds['Goals Over/Under'], 'Over 2.5'); mk.under25 = getOdd(parsedOdds['Goals Over/Under'], 'Under 2.5');
+      mk.bttsYes = getOdd(parsedOdds['Both Teams Score'], 'Yes'); mk.bttsNo = getOdd(parsedOdds['Both Teams Score'], 'No');
+      cornersB = parsedOdds['Total Corners'] || [];
+      if (mk.home.best) { mk.source = 'api-football'; mk.books = 1; }
     }
 
-    const mw       = parsedOdds['Match Winner']       || [];
-    const goalsB   = parsedOdds['Goals Over/Under']   || [];
-    const bttsB    = parsedOdds['Both Teams Score']    || [];
-    const cornersB = parsedOdds['Total Corners']       || [];
-    const getOdd   = (arr, val) => parseFloat(arr.find(v=>v.value===val)?.odd||0);
+    const fair1x2 = Model.devig([mk.home.avg, mk.draw.avg, mk.away.avg]);
+    const fairOU  = Model.devig([mk.over25.avg, mk.under25.avg]);
+    const fairBT  = Model.devig([mk.bttsYes.avg, mk.bttsNo.avg]);
 
-    const homeOdd    = getOdd(mw,     'Home');
-    const drawOdd    = getOdd(mw,     'Draw');
-    const awayOdd    = getOdd(mw,     'Away');
-    const over25Odd  = getOdd(goalsB, 'Over 2.5');
-    const under25Odd = getOdd(goalsB, 'Under 2.5');
-    const bttsYes    = getOdd(bttsB,  'Yes');
-    const bttsNo     = getOdd(bttsB,  'No');
+    // ── Modelo + mistura com o mercado ───────────────────────
+    const pred = modelPrediction(leagueId, homeName, awayName);
+    const modelOk = pred && pred.knownHome && pred.knownAway;
+    const p1x2Model = pred ? [pred.home, pred.draw, pred.away] : null;
+    const wModel = modelOk ? MODEL_WEIGHT : (pred ? MODEL_WEIGHT / 3 : 0); // equipas desconhecidas → confia mais no mercado
+    const p1x2 = Model.blend(p1x2Model, fair1x2?.probs, wModel) || [0.45, 0.27, 0.28];
+    const pOver = Model.blend(pred ? [pred.over['2.5'], 1 - pred.over['2.5']] : null, fairOU?.probs, wModel) || [0.5, 0.5];
+    const pBtts = Model.blend(pred ? [pred.btts, 1 - pred.btts] : null, fairBT?.probs, wModel) || [0.5, 0.5];
 
-    const est = estimateProbs(homeStats, awayStats);
+    const pc = x => Math.round(x * 1000) / 10;
+    const est = {
+      homeP: pc(p1x2[0]), drawP: pc(p1x2[1]), awayP: pc(p1x2[2]),
+      over25P: pc(pOver[0]), bttsP: pc(pBtts[0]),
+      totalExpected: pred ? (pred.lambdaHome + pred.lambdaAway).toFixed(2) : '—',
+    };
+    const ev = (p, o) => Model.expectedValue(p, o);
+    const vr = (p, o) => valueRating(o > 1 ? ev(p, o) : null, o > 1);
 
     const analysis = {
       fixture,
       odds: {
-        matchWinner: { homeOdd, drawOdd, awayOdd },
-        goals:       { over25Odd, under25Odd },
-        btts:        { bttsYesOdd: bttsYes, bttsNoOdd: bttsNo },
+        matchWinner: { homeOdd: mk.home.best||0, drawOdd: mk.draw.best||0, awayOdd: mk.away.best||0 },
+        goals:       { over25Odd: mk.over25.best||0, under25Odd: mk.under25.best||0 },
+        btts:        { bttsYesOdd: mk.bttsYes.best||0, bttsNoOdd: mk.bttsNo.best||0 },
         corners:     cornersB,
         raw:         parsedOdds,
+        source:      mk.source, bookmakers: mk.books,
       },
+      // probabilidades JUSTAS do mercado (sem a margem da casa)
       implied: {
-        home:    impliedProb(homeOdd),
-        draw:    impliedProb(drawOdd),
-        away:    impliedProb(awayOdd),
-        over25:  impliedProb(over25Odd),
-        bttsYes: impliedProb(bttsYes),
+        home:    fair1x2 ? pc(fair1x2.probs[0]) : 0,
+        draw:    fair1x2 ? pc(fair1x2.probs[1]) : 0,
+        away:    fair1x2 ? pc(fair1x2.probs[2]) : 0,
+        over25:  fairOU ? pc(fairOU.probs[0]) : 0,
+        bttsYes: fairBT ? pc(fairBT.probs[0]) : 0,
+        margin:  fair1x2 ? pc(fair1x2.margin) : null,
       },
       estimated: est,
       value: {
-        home:   valueRating(impliedProb(homeOdd),   est.homeP),
-        draw:   valueRating(impliedProb(drawOdd),   est.drawP),
-        away:   valueRating(impliedProb(awayOdd),   est.awayP),
-        over25: valueRating(impliedProb(over25Odd), est.over25P),
-        btts:   valueRating(impliedProb(bttsYes),   est.bttsP),
+        home:   vr(p1x2[0], mk.home.best),
+        draw:   vr(p1x2[1], mk.draw.best),
+        away:   vr(p1x2[2], mk.away.best),
+        over25: vr(pOver[0], mk.over25.best),
+        under25: vr(pOver[1], mk.under25.best),
+        btts:   vr(pBtts[0], mk.bttsYes.best),
       },
+      model: pred ? {
+        type: 'dixon-coles', weight: +wModel.toFixed(2),
+        pure: { home: pc(pred.home), draw: pc(pred.draw), away: pc(pred.away), over15: pc(pred.over['1.5']), over25: pc(pred.over['2.5']), over35: pc(pred.over['3.5']), btts: pc(pred.btts) },
+        xg: { home: +pred.lambdaHome.toFixed(2), away: +pred.lambdaAway.toFixed(2) },
+        topScores: pred.topScores.map(s => ({ score: s.score, p: pc(s.p) })),
+        confidence: modelOk ? pred.confidence : 'baixa',
+        teamsFound: { home: pred.homeKey, away: pred.awayKey },
+        effectiveGames: pred.effectiveGames,
+        trainedOn: pred.nMatches,
+      } : null,
       h2h: {
         matches: h2hMatches.slice(0,5).map(m=>({
           fixture: { id: m.fixture_id, date: m.date, status: { short:'FT' } },
@@ -531,11 +619,14 @@ app.post('/api/db/import', (req, res) => {
     if (!table||!data||!Array.isArray(data)) return res.status(400).json({ error: 'Body inválido' });
     if (!['matches','odds','team_season_stats'].includes(table)) return res.status(400).json({ error: 'Tabela inválida' });
     if (!data.length) return res.json({ imported:0, skipped:0 });
-    const cols = Object.keys(data[0]);
+    // Só colunas que existem na tabela (os nomes vinham do body → SQL injection)
+    const valid = new Set(wdb.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+    const cols = Object.keys(data[0]).filter(c => valid.has(c));
+    if (!cols.length) return res.status(400).json({ error: 'Nenhuma coluna válida' });
     const stmt = wdb.prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(',')}) VALUES (${cols.map(()=>'?').join(',')})`);
     let imported=0, skipped=0;
     wdb.transaction(rows=>{ for(const r of rows){ const x=stmt.run(...cols.map(c=>r[c]??null)); if(x.changes>0)imported++;else skipped++; }})(data);
-    db=null;
+    if (db) { try { db.close(); } catch {} } db=null; modelCache.flushAll();
     res.json({ success:true, imported, skipped, total: data.length });
   } catch(e){ res.status(500).json({error:e.message}); } finally { if(wdb)wdb.close(); }
 });
@@ -707,6 +798,34 @@ app.get('/api/report', (req, res) => {
   }
 });
 
+// ── Modelo: desempenho (backtest) e ratings ───────────────────
+app.get('/api/model/performance', (req, res) => {
+  if (!fs.existsSync(PERF_PATH)) return res.json({ available: false, message: 'Ainda sem backtest. Corre: docker compose run --rm collector node backtest.js' });
+  try { res.json({ available: true, ...JSON.parse(fs.readFileSync(PERF_PATH, 'utf8')) }); }
+  catch (e) { res.status(500).json({ available: false, error: e.message }); }
+});
+
+app.get('/api/model/ratings', (req, res) => {
+  const leagueId = parseInt(req.query.league_id);
+  if (!leagueId) return res.status(400).json({ error: 'league_id obrigatório' });
+  const m = getModel(leagueId);
+  if (!m) return res.json({ available: false, message: 'Dados insuficientes para esta liga (mín. 30 jogos).' });
+  const teams = Object.entries(m.teams).map(([name, t]) => ({
+    team: name, attack: +t.att.toFixed(3), defence: +t.def.toFixed(3),
+    // força global: golos esperados marcados − sofridos contra uma equipa média em campo neutro
+    rating: +((t.att - m.mean * t.def)).toFixed(3), games: +t.games.toFixed(1),
+  })).sort((a, b) => b.rating - a.rating);
+  res.json({ available: true, home_advantage: +m.gamma.toFixed(3), rho: +m.rho.toFixed(3), avg_goals: +m.mean.toFixed(3), matches: m.nMatches, teams });
+});
+
+app.get('/api/model/predict', (req, res) => {
+  const { league_id, home, away } = req.query;
+  if (!league_id || !home || !away) return res.status(400).json({ error: 'league_id, home e away são obrigatórios' });
+  const p = modelPrediction(parseInt(league_id), home, away);
+  if (!p) return res.json({ available: false });
+  res.json({ available: true, ...p, topScores: p.topScores });
+});
+
 // ── Admin: Sources ────────────────────────────────────────────
 function loadSources() {
   const defaults = [
@@ -778,6 +897,8 @@ app.delete('/api/admin/sources/:id', (req, res) => {
 // ── Admin: Trigger collector ──────────────────────────────────
 app.post('/api/admin/trigger', (req, res) => {
   const { collector='main', mode='daily', season } = req.body;
+  if (!['daily','backfill','status'].includes(mode)) return res.status(400).json({ error: 'Modo inválido' });
+  if (season && !/^\d{4}$/.test(String(season))) return res.status(400).json({ error: 'Temporada inválida' });
   const script   = collector==='alt'?'collect-alt.js':'collect.js';
   const args     = ['node', script, `--mode=${mode}`];
   if (season) args.push(`--season=${season}`);
@@ -823,15 +944,15 @@ app.get('/api/admin/mappings', (req, res) => {
 });
 
 app.put('/api/admin/mappings/:id', (req, res) => {
-  let wdb; try { wdb=new Database(DB_PATH); wdb.prepare('UPDATE team_name_map SET canonical_name=? WHERE id=?').run(req.body.canonical_name,parseInt(req.params.id)); db=null; res.json({ok:true}); } catch(e){res.status(500).json({error:e.message});}finally{if(wdb)wdb.close();}
+  let wdb; try { wdb=new Database(DB_PATH); wdb.prepare('UPDATE team_name_map SET canonical_name=? WHERE id=?').run(req.body.canonical_name,parseInt(req.params.id)); if (db) { try { db.close(); } catch {} } db=null; modelCache.flushAll(); res.json({ok:true}); } catch(e){res.status(500).json({error:e.message});}finally{if(wdb)wdb.close();}
 });
 
 app.delete('/api/admin/mappings/:id', (req, res) => {
-  let wdb; try { wdb=new Database(DB_PATH); wdb.prepare('DELETE FROM team_name_map WHERE id=?').run(parseInt(req.params.id)); db=null; res.json({ok:true}); } catch(e){res.status(500).json({error:e.message});}finally{if(wdb)wdb.close();}
+  let wdb; try { wdb=new Database(DB_PATH); wdb.prepare('DELETE FROM team_name_map WHERE id=?').run(parseInt(req.params.id)); if (db) { try { db.close(); } catch {} } db=null; modelCache.flushAll(); res.json({ok:true}); } catch(e){res.status(500).json({error:e.message});}finally{if(wdb)wdb.close();}
 });
 
 app.post('/api/admin/mappings', (req, res) => {
-  let wdb; try { wdb=new Database(DB_PATH); const {source='football-data',source_name,canonical_name}=req.body; wdb.prepare('INSERT INTO team_name_map (source,source_name,canonical_name) VALUES (?,?,?) ON CONFLICT(source,source_name) DO UPDATE SET canonical_name=excluded.canonical_name').run(source,source_name,canonical_name); db=null; res.json({ok:true}); } catch(e){res.status(500).json({error:e.message});}finally{if(wdb)wdb.close();}
+  let wdb; try { wdb=new Database(DB_PATH); const {source='football-data',source_name,canonical_name}=req.body; wdb.prepare('INSERT INTO team_name_map (source,source_name,canonical_name) VALUES (?,?,?) ON CONFLICT(source,source_name) DO UPDATE SET canonical_name=excluded.canonical_name').run(source,source_name,canonical_name); if (db) { try { db.close(); } catch {} } db=null; modelCache.flushAll(); res.json({ok:true}); } catch(e){res.status(500).json({error:e.message});}finally{if(wdb)wdb.close();}
 });
 
 app.get('/api/admin/collection-log', (req, res) => {
