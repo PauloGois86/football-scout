@@ -197,11 +197,27 @@ function predict(model, home, away) {
 
 // ── Utilitários de mercado ────────────────────────────────────
 
-/** Remove a margem da casa (método proporcional). odds: array de odds decimais. */
-function devig(odds) {
+/**
+ * Remove a margem da casa. odds: array de odds decimais.
+ *  - 'proportional': divide a margem proporcionalmente (sobrestima os azarões)
+ *  - 'power': p_i = (1/o_i)^k com k tal que Σp = 1 — corrige o favourite-longshot bias
+ */
+function devig(odds, method = 'proportional') {
   if (!odds || odds.some(o => !(o > 1))) return null;
   const inv = odds.map(o => 1 / o);
   const s = inv.reduce((a, b) => a + b, 0);
+  if (method === 'power' && s > 1) {
+    let lo = 1, hi = 10;
+    for (let i = 0; i < 60; i++) {
+      const k = (lo + hi) / 2;
+      const t = inv.reduce((a, p) => a + Math.pow(p, k), 0);
+      if (t > 1) lo = k; else hi = k;
+    }
+    const k = (lo + hi) / 2;
+    const probs = inv.map(p => Math.pow(p, k));
+    const z = probs.reduce((a, b) => a + b, 0);
+    return { probs: probs.map(p => p / z), margin: s - 1 };
+  }
   return { probs: inv.map(p => p / s), margin: s - 1 };
 }
 

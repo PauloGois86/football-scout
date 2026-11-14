@@ -48,6 +48,11 @@ test('devig, EV e kelly', () => {
   const d = model.devig([2.0, 3.5, 4.0]);
   assert.ok(Math.abs(d.probs.reduce((a, b) => a + b) - 1) < 1e-12);
   assert.ok(d.margin > 0);
+  const pw = model.devig([1.5, 4.2, 7.0], 'power');
+  const pr = model.devig([1.5, 4.2, 7.0]);
+  assert.ok(Math.abs(pw.probs.reduce((a, b) => a + b) - 1) < 1e-9);
+  assert.ok(pw.probs[2] < pr.probs[2], 'power dá menos probabilidade ao azarão');
+  assert.ok(pw.probs[0] > pr.probs[0], 'e mais ao favorito');
   assert.ok(Math.abs(model.expectedValue(0.55, 2.0) - 0.1) < 1e-12);
   assert.strictEqual(model.kelly(0.4, 2.0), 0);
   assert.ok(model.kelly(0.6, 2.0) > 0);

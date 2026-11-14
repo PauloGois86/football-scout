@@ -17,6 +17,8 @@
  *   node backtest-market.js --from=2019         → só temporadas ≥ 2019
  *   node backtest-market.js --no-model          → só estratégia A (rápido)
  *   node backtest-market.js --tier=2            → só ligas secundárias
+ *   node backtest-market.js --devig=proportional  → método antigo de remover a margem (comparação)
+ *   node backtest-market.js --no-model --detail="A|1x2|interwetten|open|>0.02"  → por época e liga
  *
  * Requer: node import-fdcouk.js (guarda as odds por casa na tabela book_odds)
  * Resultado: terminal + $DB_DIR/market-backtest.json
@@ -34,6 +36,9 @@ const flag = k => process.argv.includes(`--${k}`);
 const OUT = arg('out', path.join(path.dirname(DB_PATH), 'market-backtest.json'));
 const FROM = arg('from') ? parseInt(arg('from')) : null;
 const TIER = arg('tier') ? parseInt(arg('tier')) : null;
+const DEVIG = arg('devig', 'power');          // power (por defeito) | proportional
+const DETAIL = arg('detail');                  // ex.: "A|1x2|interwetten|open|>0.02" → detalhe por época e liga
+const fair = odds => M.devig(odds, DEVIG)?.probs;
 
 const SOFT_BOOKS = ['bet365', 'bwin', 'interwetten', 'williamhill', 'vcbet', 'max'];
 const EDGE_THRESHOLDS = [0, 0.02, 0.04, 0.06, 0.10];
@@ -74,7 +79,7 @@ function bump(parts, odd, won, fairClose) {
 // regista no agregado "all", no tier e na liga
 function record(base, m, odd, won, fairClose) {
   const tier = tierOf.get(m.league_id) || 0;
-  bump([`${base}|all`, `${base}|tier${tier}`, `${base}|league:${m.league_id}`], odd, won, fairClose);
+  bump([`${base}|all`, `${base}|tier${tier}`, `${base}|league:${m.league_id}`, `${base}|season:${m.season}`], odd, won, fairClose);
 }
 
 // ── Dados ─────────────────────────────────────────────────────
@@ -99,10 +104,10 @@ const LBL = ['casa', 'empate', 'fora'];
 function strategySoftVsSharp(matches, books) {
   for (const m of matches) {
     const b = books.get(m.fixture_id);
-    const pinOpen = M.devig(x12(b.open.pinnacle))?.probs;
-    const pinClose = M.devig(x12(b.close.pinnacle))?.probs;
-    const ouOpen = M.devig(xOU(b.open.pinnacle))?.probs;
-    const ouClose = M.devig(xOU(b.close.pinnacle))?.probs;
+    const pinOpen = fair(x12(b.open.pinnacle));
+    const pinClose = fair(x12(b.close.pinnacle));
+    const ouOpen = fair(xOU(b.open.pinnacle));
+    const ouClose = fair(xOU(b.close.pinnacle));
     const o = res1x2(m), ou = resOU(m);
 
     for (const book of SOFT_BOOKS) {
@@ -162,8 +167,8 @@ function strategyModel(allMatches, books) {
         if (!p.knownHome || !p.knownAway) continue;
         const probs = [p.home, p.draw, p.away];
         const pOU = [p.over['2.5'], 1 - p.over['2.5']];
-        const pinClose = M.devig(x12(b.close.pinnacle))?.probs;
-        const ouClose = M.devig(xOU(b.close.pinnacle))?.probs;
+        const pinClose = fair(x12(b.close.pinnacle));
+        const ouClose = fair(xOU(b.close.pinnacle));
         const o = res1x2(m), ou = resOU(m);
         for (const book of MODEL_PRICES) {
           const price = x12(b.open[book]);
@@ -181,6 +186,44 @@ function strategyModel(allMatches, books) {
     }
   }
   process.stdout.write('\n');
+}
+
+// ── Diagnóstico: qual o método de devig mais bem calibrado? ───
+// Compara a probabilidade justa (fecho Pinnacle) com a frequência real, por faixa de odd.
+function devigCalibration(matches, books) {
+  const bands = [[1, 1.5], [1.5, 2], [2, 3], [3, 4.5], [4.5, 7], [7, 12], [12, 1000]];
+  const rows = bands.map(([lo, hi]) => ({ lo, hi, n: 0, won: 0, prop: 0, power: 0 }));
+  for (const m of matches) {
+    const c = x12(books.get(m.fixture_id).close.pinnacle);
+    if (!c) continue;
+    const pp = M.devig(c, 'proportional').probs, pw = M.devig(c, 'power').probs, o = res1x2(m);
+    c.forEach((odd, k) => {
+      const r = rows.find(b => odd >= b.lo && odd < b.hi); if (!r) return;
+      r.n++; r.won += k === o ? 1 : 0; r.prop += pp[k]; r.power += pw[k];
+    });
+  }
+  console.log('\n══ Calibração do preço justo (fecho Pinnacle, 1X2) — o método mais próximo do "real" ganha');
+  console.log('   faixa de odd      n        real    proporcional   power');
+  for (const r of rows) {
+    if (!r.n) continue;
+    const real = r.won / r.n, se = Math.sqrt(real * (1 - real) / r.n) * 1.96;
+    console.log(`   ${(r.lo + '–' + (r.hi > 100 ? '∞' : r.hi)).padEnd(12)} ${String(r.n).padStart(7)}   ${pct(real, 2).padStart(6)} ±${pct(se, 2).padEnd(6)} ${pct(r.prop / r.n, 2).padStart(8)}    ${pct(r.power / r.n, 2).padStart(8)}`);
+  }
+  return rows;
+}
+
+function printDetail(base) {
+  const keys = Object.keys(results).filter(k => k.startsWith(base + '|'));
+  if (!keys.length) { console.log(`\nSem resultados para "${base}"`); return; }
+  console.log(`\n══ Detalhe: ${base}`);
+  console.log('   âmbito                     apostas   ROI (±IC95)          CLV (±IC95)');
+  const label = k => { const sc = k.slice(base.length + 1);
+    if (sc.startsWith('league:')) { const id = +sc.slice(7); return LEAGUES.find(l => l.leagueId === id)?.name || sc; }
+    return sc; };
+  for (const k of keys.sort()) {
+    const r = fin(results[k]); if (!r.bets) continue;
+    console.log(`   ${label(k).padEnd(26)} ${String(r.bets).padStart(7)}   ${(pct(r.roi) + ' ±' + pct(r.roi_ci95)).padEnd(20)} ${r.clv == null ? '—' : pct(r.clv, 2) + ' ±' + pct(r.clv_ci95, 2)}`);
+  }
 }
 
 // ── Relatório ─────────────────────────────────────────────────
@@ -226,7 +269,8 @@ function main() {
   const { books, matches } = data;
   if (!matches.length) { console.error('Sem jogos com odds por casa. Corre: node import-fdcouk.js'); process.exit(1); }
   const leagues = new Set(matches.map(m => m.league_id));
-  console.log(`⚽ Backtest de mercado — ${matches.length} jogos, ${leagues.size} ligas${FROM ? `, desde ${FROM}` : ''}`);
+  console.log(`⚽ Backtest de mercado — ${matches.length} jogos, ${leagues.size} ligas${FROM ? `, desde ${FROM}` : ''} · devig: ${DEVIG}`);
+  const calibration = devigCalibration(matches, books);
 
   strategySoftVsSharp(matches, books);
   if (!flag('no-model')) strategyModel(matches, books);
@@ -239,14 +283,18 @@ function main() {
     printTable('══ B) Modelo Dixon-Coles em odds de abertura — Over/Under 2.5', 'B|ou25|', scopes);
   }
 
+  if (DETAIL) printDetail(DETAIL);
+
   console.log(`
 Como ler:
   • CLV (closing line value) é o indicador principal: positivo e com IC95 acima de 0 = vantagem real.
   • ROI com poucas centenas de apostas é quase só ruído — repara na largura do ±IC95.
   • "max" = melhor odd do mercado nesse momento; nem sempre é possível apostar lá (limites, contas).
-  • Casas soft limitam ou fecham contas que ganham de forma consistente.`);
+  • Casas soft limitam ou fecham contas que ganham de forma consistente.
+  • Muitas variantes testadas ao mesmo tempo: ~5% dão "significativo" por puro acaso.
+    Confirma uma variante com --detail="A|1x2|<casa>|open|>0.02" (consistência por época e liga).`);
 
-  const out = { generated_at: new Date().toISOString(), params: { from: FROM, tier: TIER, edge_thresholds: EDGE_THRESHOLDS, model_thresholds: MODEL_THRESHOLDS },
+  const out = { generated_at: new Date().toISOString(), calibration, params: { devig: DEVIG, from: FROM, tier: TIER, edge_thresholds: EDGE_THRESHOLDS, model_thresholds: MODEL_THRESHOLDS },
     leagues: Object.fromEntries(LEAGUES.map(l => [l.leagueId, { name: l.name, tier: l.tier }])), results: {} };
   for (const [k, a] of Object.entries(results)) out.results[k] = fin(a);
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
