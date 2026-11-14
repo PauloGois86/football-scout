@@ -56,6 +56,12 @@ function ensureSchema(db) {
       over25_open REAL, under25_open REAL, over25_close REAL, under25_close REAL,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+    -- Odds por casa de apostas e por momento (open = véspera do jogo, close = fecho)
+    CREATE TABLE IF NOT EXISTS book_odds (
+      fixture_id INTEGER NOT NULL, book TEXT NOT NULL, phase TEXT NOT NULL,
+      h REAL, d REAL, a REAL, over25 REAL, under25 REAL,
+      PRIMARY KEY (fixture_id, book, phase)
+    );
     CREATE INDEX IF NOT EXISTS idx_matches_league_season ON matches(league_id, season);
     CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_id, away_id);
     CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date);

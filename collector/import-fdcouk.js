@@ -9,6 +9,7 @@
  * Uso:
  *   node import-fdcouk.js                       → todas as ligas, temporadas 2015 → actual
  *   node import-fdcouk.js --from=2019 --league=39
+ *   node import-fdcouk.js --tier=2               → só ligas secundárias
  *   node import-fdcouk.js --dir=/data/csv       → usa CSVs locais (ex.: E0_2324.csv) em vez de download
  */
 require('dotenv').config();
@@ -22,15 +23,59 @@ const { similarity, syntheticFixtureId } = require('../shared/names');
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../data/football.db');
 const arg = (k, d) => { const a = process.argv.find(x => x.startsWith(`--${k}=`)); return a ? a.split('=')[1] : d; };
 
+// tier 1 = ligas principais; tier 2 = secundárias (mercados menos eficientes — onde vale a pena procurar vantagem)
 const LEAGUES = [
-  { code: 'E0',  leagueId: 39,  name: 'Premier League' },
-  { code: 'SP1', leagueId: 140, name: 'La Liga' },
-  { code: 'I1',  leagueId: 135, name: 'Serie A' },
-  { code: 'D1',  leagueId: 78,  name: 'Bundesliga' },
-  { code: 'F1',  leagueId: 61,  name: 'Ligue 1' },
-  { code: 'P1',  leagueId: 94,  name: 'Primeira Liga' },
-  { code: 'N1',  leagueId: 88,  name: 'Eredivisie' },
+  { code: 'E0',  leagueId: 39,  name: 'Premier League', tier: 1 },
+  { code: 'SP1', leagueId: 140, name: 'La Liga',        tier: 1 },
+  { code: 'I1',  leagueId: 135, name: 'Serie A',        tier: 1 },
+  { code: 'D1',  leagueId: 78,  name: 'Bundesliga',     tier: 1 },
+  { code: 'F1',  leagueId: 61,  name: 'Ligue 1',        tier: 1 },
+  { code: 'P1',  leagueId: 94,  name: 'Primeira Liga',  tier: 1 },
+  { code: 'N1',  leagueId: 88,  name: 'Eredivisie',     tier: 1 },
+  { code: 'E1',  leagueId: 40,  name: 'Championship',   tier: 2 },
+  { code: 'E2',  leagueId: 41,  name: 'League One',     tier: 2 },
+  { code: 'E3',  leagueId: 42,  name: 'League Two',     tier: 2 },
+  { code: 'SP2', leagueId: 141, name: 'Segunda División', tier: 2 },
+  { code: 'I2',  leagueId: 136, name: 'Serie B',        tier: 2 },
+  { code: 'D2',  leagueId: 79,  name: '2. Bundesliga',  tier: 2 },
+  { code: 'F2',  leagueId: 62,  name: 'Ligue 2',        tier: 2 },
+  { code: 'SC0', leagueId: 179, name: 'Scottish Premiership', tier: 2 },
+  { code: 'B1',  leagueId: 144, name: 'Jupiler Pro League',   tier: 2 },
+  { code: 'T1',  leagueId: 203, name: 'Süper Lig',      tier: 2 },
+  { code: 'G1',  leagueId: 197, name: 'Super League Greece',  tier: 2 },
 ];
+
+// Colunas por casa: [abertura 1X2], [fecho 1X2], [abertura O/U 2.5], [fecho O/U 2.5].
+// Nota: no football-data.co.uk "abertura" = odds recolhidas na véspera (sexta para jogos de fim-de-semana).
+const BOOKS = {
+  pinnacle:    { open: ['PSH','PSD','PSA'], openAlt: ['PH','PD','PA'], close: ['PSCH','PSCD','PSCA'], ou: ['P>2.5','P<2.5'], ouClose: ['PC>2.5','PC<2.5'] },
+  bet365:      { open: ['B365H','B365D','B365A'], close: ['B365CH','B365CD','B365CA'], ou: ['B365>2.5','B365<2.5'], ouClose: ['B365C>2.5','B365C<2.5'] },
+  bwin:        { open: ['BWH','BWD','BWA'], close: ['BWCH','BWCD','BWCA'] },
+  interwetten: { open: ['IWH','IWD','IWA'], close: ['IWCH','IWCD','IWCA'] },
+  williamhill: { open: ['WHH','WHD','WHA'], close: ['WHCH','WHCD','WHCA'] },
+  vcbet:       { open: ['VCH','VCD','VCA'], close: ['VCCH','VCCD','VCCA'] },
+  max:         { open: ['MaxH','MaxD','MaxA'], openAlt: ['BbMxH','BbMxD','BbMxA'], close: ['MaxCH','MaxCD','MaxCA'], ou: ['Max>2.5','Max<2.5'], ouAlt: ['BbMx>2.5','BbMx<2.5'], ouClose: ['MaxC>2.5','MaxC<2.5'] },
+  avg:         { open: ['AvgH','AvgD','AvgA'], openAlt: ['BbAvH','BbAvD','BbAvA'], close: ['AvgCH','AvgCD','AvgCA'], ou: ['Avg>2.5','Avg<2.5'], ouAlt: ['BbAv>2.5','BbAv<2.5'], ouClose: ['AvgC>2.5','AvgC<2.5'] },
+};
+
+function bookOdds(r) {
+  const out = [];
+  const take = cols => cols ? cols.map(c => num(r[c])) : [null];
+  const ok = arr => arr.every(Boolean);
+  for (const [book, c] of Object.entries(BOOKS)) {
+    for (const phase of ['open', 'close']) {
+      let x = phase === 'open' ? take(c.open) : take(c.close);
+      if (!ok(x) && phase === 'open' && c.openAlt) x = take(c.openAlt);
+      let ou = phase === 'open' ? take(c.ou) : take(c.ouClose);
+      if (!ok(ou) && phase === 'open' && c.ouAlt) ou = take(c.ouAlt);
+      const has1x2 = x.length === 3 && ok(x), hasOu = ou.length === 2 && ok(ou);
+      if (!has1x2 && !hasOu) continue;
+      out.push({ book, phase, h: has1x2 ? x[0] : null, d: has1x2 ? x[1] : null, a: has1x2 ? x[2] : null,
+        over25: hasOu ? ou[0] : null, under25: hasOu ? ou[1] : null });
+    }
+  }
+  return out;
+}
 
 function currentSeason() { const n = new Date(); return n.getMonth() >= 6 ? n.getFullYear() : n.getFullYear() - 1; }
 const seasonCode = s => `${String(s % 100).padStart(2, '0')}${String((s + 1) % 100).padStart(2, '0')}`;
@@ -86,6 +131,7 @@ function mapRow(r) {
       over25_open: first(r, 'P>2.5', 'Avg>2.5', 'BbAv>2.5', 'B365>2.5'), under25_open: first(r, 'P<2.5', 'Avg<2.5', 'BbAv<2.5', 'B365<2.5'),
       over25_close: first(r, 'PC>2.5', 'AvgC>2.5'), under25_close: first(r, 'PC<2.5', 'AvgC<2.5'),
     },
+    books: bookOdds(r),
   };
 }
 
@@ -135,6 +181,11 @@ function importRows(db, rows, league, season) {
       max_a=excluded.max_a, over25_open=excluded.over25_open, under25_open=excluded.under25_open,
       over25_close=excluded.over25_close, under25_close=excluded.under25_close, updated_at=datetime('now')`);
 
+  const upBook = db.prepare(`INSERT INTO book_odds (fixture_id, book, phase, h, d, a, over25, under25)
+    VALUES (@fixture_id, @book, @phase, @h, @d, @a, @over25, @under25)
+    ON CONFLICT(fixture_id, book, phase) DO UPDATE SET h=excluded.h, d=excluded.d, a=excluded.a,
+      over25=excluded.over25, under25=excluded.under25`);
+
   let inserted = 0, merged = 0, withOdds = 0;
   db.transaction(() => {
     for (const r of rows) {
@@ -165,6 +216,7 @@ function importRows(db, rows, league, season) {
         if (res.changes) inserted++;
       }
       if (r.odds.open_h || r.odds.close_h) { upOdds.run({ fixture_id: fixtureId, ...r.odds }); withOdds++; }
+      for (const b of r.books) upBook.run({ fixture_id: fixtureId, ...b });
     }
   })();
   return { inserted, merged, withOdds };
@@ -174,8 +226,10 @@ async function main() {
   const from = parseInt(arg('from', '2015'));
   const to = parseInt(arg('to', String(currentSeason())));
   const leagueArg = arg('league');
+  const tierArg = arg('tier');
   const dir = arg('dir');
-  const leagues = LEAGUES.filter(l => !leagueArg || String(l.leagueId) === leagueArg || l.code === leagueArg);
+  const leagues = LEAGUES.filter(l => (!leagueArg || String(l.leagueId) === leagueArg || l.code === leagueArg)
+                                   && (!tierArg || String(l.tier) === tierArg));
 
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
@@ -192,7 +246,7 @@ async function main() {
       const rows = parseCsv(csv).map(mapRow).filter(Boolean);
       const r = importRows(db, rows, lg, s);
       for (const k of Object.keys(tot)) tot[k] += r[k];
-      console.log(`  ${lg.name.padEnd(16)} ${s}/${(s + 1) % 100}: ${rows.length} jogos → +${r.inserted} novos, ${r.merged} fundidos, ${r.withOdds} c/ odds`);
+      console.log(`  ${lg.name.padEnd(22)} ${s}/${(s + 1) % 100}: ${rows.length} jogos → +${r.inserted} novos, ${r.merged} fundidos, ${r.withOdds} c/ odds`);
       await new Promise(res => setTimeout(res, 300));
     }
   }
@@ -202,4 +256,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(e => { console.error('Erro fatal:', e.message); process.exit(1); });
-module.exports = { parseCsv, mapRow, importRows, parseDate };
+module.exports = { parseCsv, mapRow, importRows, parseDate, bookOdds, LEAGUES };

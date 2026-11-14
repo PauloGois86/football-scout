@@ -16,6 +16,7 @@
     "import:history":   "node import-fdcouk.js",
     "backtest":         "node backtest.js",
     "backtest:sim":     "node backtest.js --simulate",
+    "backtest:market":  "node backtest-market.js",
     "test":             "node --test ../shared/model.test.js"
   },
   "dependencies": {

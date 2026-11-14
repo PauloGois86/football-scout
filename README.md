@@ -67,6 +67,29 @@ git clone https://github.com/PauloGois86/football-scout.git C:\dev\football-scou
 `node backtest.js --simulate` corre numa liga sintética onde as probabilidades verdadeiras são
 conhecidas — útil para perceber os limites (ver abaixo).
 
+## Backtest contra o mercado (`backtest-market.js`)
+
+Testa se existe **alguma** estratégia com CLV positivo consistente, usando as odds por casa
+guardadas pelo `import-fdcouk.js` (tabela `book_odds`, inclui ligas secundárias):
+
+- **A) Casa soft vs Pinnacle** — aposta na Bet365/William Hill/... quando a odd supera o preço
+  justo da Pinnacle (sem margem) em mais de X% (0, 2, 4, 6, 10%).
+- **B) Modelo em odds de abertura** — Dixon-Coles walk-forward, preços Pinnacle/Bet365/máximo,
+  separado em ligas principais (tier1) e secundárias (tier2).
+
+Cada linha mostra ROI e CLV com intervalo de confiança a 95% e um veredicto. Regra de decisão:
+se nenhuma variante tiver CLV > 0 com o intervalo todo acima de zero, não há vantagem explorável.
+
+```bash
+docker compose run --rm collector node import-fdcouk.js          # re-importa c/ odds por casa + ligas secundárias
+docker compose run --rm collector node backtest-market.js        # A + B
+docker compose run --rm collector node backtest-market.js --no-model --from=2019   # só A, rápido
+```
+
+Notas: no football-data.co.uk a "abertura" são odds recolhidas na véspera (sexta-feira para jogos
+de fim-de-semana); "max" é a melhor odd do mercado, nem sempre apostável; e as casas soft limitam
+contas que ganham de forma consistente.
+
 ## É viável ter "alta taxa de sucesso"?
 
 Expectativas realistas, baseadas na literatura e no backtest simulado deste projecto:
